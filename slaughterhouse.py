@@ -14,7 +14,6 @@ def generate_background(img_array, foreground_mask):
     kernel = np.ones((15, 15), np.uint8)
     dilated_mask = cv2.dilate(foreground_mask, kernel, iterations=1)
     inpainted_bg = cv2.inpaint(img_array, dilated_mask, inpaintRadius=20, flags=cv2.INPAINT_TELEA)
-    
     bg_byte_arr = io.BytesIO()
     Image.fromarray(inpainted_bg).save(bg_byte_arr, format='PNG')
     return "layer_000.png", bg_byte_arr.getvalue()
@@ -22,26 +21,18 @@ def generate_background(img_array, foreground_mask):
 def generate_layer(layer_idx, combined_mask, img_array):
     if not np.any(combined_mask):
         return None
-        
     mask_smoothed = cv2.GaussianBlur((combined_mask * 255).astype(np.uint8), (3, 3), 0)
     layer_rgba = np.zeros((img_array.shape[0], img_array.shape[1], 4), dtype=np.uint8)
     layer_rgba[..., :3] = img_array
     layer_rgba[..., 3] = mask_smoothed
-    
     img_byte_arr = io.BytesIO()
     Image.fromarray(layer_rgba).save(img_byte_arr, format='PNG')
     return f"layer_{layer_idx:03d}.png", img_byte_arr.getvalue()
 
 def run_slaughter():
-    print("Summoning the Blind Discriminator...", flush=True)
+    print("Waking the Blind Discriminator (SAM) on the free tier...", flush=True)
     device = 0 if torch.cuda.is_available() else -1
-
-    # We abandon depth estimation entirely. Physical space is irrelevant to flat art.
-    seg_pipe = pipeline(
-        task="mask-generation", 
-        model="facebook/sam-vit-base", 
-        device=device
-    )
+    seg_pipe = pipeline("mask-generation", model="facebook/sam-vit-base", device=device)
 
     inbox_files = glob.glob("inbox/*")
     if not inbox_files:
@@ -52,39 +43,39 @@ def run_slaughter():
     
     match = re.search(r'_layers-(\d+)\.', target_file)
     layers = int(match.group(1)) if match else 6
-    
-    print(f"Preparing to sever {layers} strata based on semantic hierarchy...", flush=True)
+
+    print(f"Preparing to sever {layers} strata based on logarithmic mass...", flush=True)
 
     original_img = Image.open(target_file).convert("RGB")
     W, H = original_img.size
     
+    # GitHub Actions will OOM instantly if we push past 800 on a CPU
     MAX_DIM = 800
     if max(H, W) > MAX_DIM:
         scale = MAX_DIM / float(max(H, W))
-        new_W = int(W * scale)
-        new_H = int(H * scale)
+        new_W, new_H = int(W * scale), int(H * scale)
         original_img = original_img.resize((new_W, new_H), Image.LANCZOS)
-        print(f"Victim downscaled to {new_W}x{new_H} to survive the memory constraints.", flush=True)
+        print(f"Victim aggressively downscaled to {new_W}x{new_H} to prevent kernel panic.", flush=True)
 
     img_array = np.array(original_img)
     H, W = img_array.shape[:2]
+    TOTAL_PIXELS = H * W
         
     print("Shattering the canvas into semantic shards...", flush=True)
     raw_segments = seg_pipe(original_img)
     
+    mask_list = []
     if isinstance(raw_segments, dict) and "masks" in raw_segments:
         mask_list = list(raw_segments["masks"])
     elif isinstance(raw_segments, list):
         mask_list = [s["mask"] if isinstance(s, dict) and "mask" in s else s for s in raw_segments]
-    else:
-        mask_list = []
 
     if not mask_list:
         print("The machine saw nothing. Aborting.", flush=True)
         return
 
-    # Standardize all masks to boolean arrays of the correct shape
     processed_masks = []
+    areas = []
     for mask_item in mask_list:
         mask_array = np.array(mask_item)
         if mask_array.shape != (H, W):
@@ -92,28 +83,40 @@ def run_slaughter():
         else:
             mask_array = mask_array > 0
         
-        if np.any(mask_array):
+        area = np.sum(mask_array)
+        # Ignore useless bounding boxes that cover the whole image, and microscopic noise
+        if area > 10 and area < (TOTAL_PIXELS * 0.95):
             processed_masks.append(mask_array)
+            areas.append(area)
 
-    # Sort the masks strictly by Area (Largest to Smallest)
-    # The largest shapes are the background. The smallest shapes are the intricate foreground details.
-    processed_masks.sort(key=lambda m: np.sum(m), reverse=True)
+    # Sort masks strictly by Area (Largest to Smallest)
+    sort_idx = np.argsort(areas)[::-1]
+    processed_masks = [processed_masks[i] for i in sort_idx]
+    areas = np.array([areas[i] for i in sort_idx])
 
-    # Distribute the sorted masks across the requested number of layers
-    masks_per_layer = max(1, len(processed_masks) // layers)
+    # Convert areas to a logarithmic scale
+    log_areas = np.log1p(areas)
+    min_log, max_log = log_areas.min(), log_areas.max()
+    
+    # Divide the logarithmic area scale into equal strata bins
+    bin_edges = np.linspace(min_log, max_log, layers)
+    
     layer_canvases = [np.zeros((H, W), dtype=bool) for _ in range(layers)]
     claimed_pixels = np.zeros((H, W), dtype=int) - 1 
 
-    print("Stacking the shards from background to foreground...", flush=True)
     for idx, mask_array in enumerate(processed_masks):
-        # Determine which strata this mask belongs to based on its size ranking
-        layer_idx = min(idx // masks_per_layer, layers - 1)
+        mask_log = log_areas[idx]
         
-        # Because we process largest to smallest, smaller details will overwrite 
-        # the background swaths in the claimed_pixels map.
+        # Find which mathematical bin this mask falls into
+        layer_idx = np.digitize(mask_log, bin_edges) - 1
+        layer_idx = np.clip(layer_idx, 0, layers - 1)
+        
+        # Invert the index so the most massive areas fall to the back (Layer 0) 
+        layer_idx = (layers - 1) - layer_idx
+        
         claimed_pixels[mask_array] = layer_idx
 
-    # Anything completely ignored by SAM defaults to the background void (Layer 0)
+    # Send the completely unclaimed void to the background
     unclaimed_mask = claimed_pixels == -1
     claimed_pixels[unclaimed_mask] = 0
 
@@ -125,9 +128,7 @@ def run_slaughter():
     print("Threading the physical labor and packaging the remains...", flush=True)
     with zipfile.ZipFile("paper_planes_strata.zip", "w", zipfile.ZIP_DEFLATED) as zip_file:
         with ThreadPoolExecutor() as executor:
-            futures = []
-            
-            futures.append(executor.submit(generate_background, img_array, foreground_mask))
+            futures = [executor.submit(generate_background, img_array, foreground_mask)]
             
             for i in range(1, layers):
                 combined_mask = layer_canvases[i]
@@ -141,7 +142,7 @@ def run_slaughter():
                     zip_file.writestr(filename, byte_data)
                     print(f"Severed {filename}", flush=True)
 
-    print("Vivisection complete. The perspective has been destroyed.", flush=True)
+    print("Vivisection complete. Artifact packaged.", flush=True)
 
 if __name__ == "__main__":
     run_slaughter()
