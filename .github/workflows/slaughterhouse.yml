@@ -1,0 +1,51 @@
+name: The Slaughterhouse
+
+on:
+  push:
+    paths:
+      - 'inbox/*'
+  workflow_dispatch:
+    inputs:
+      layers:
+        description: 'Number of strata'
+        required: false
+        default: '6'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  vivisect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout reality
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Execute vivisection
+        env:
+          LAYERS: ${{ github.event.inputs.layers || '6' }}
+        run: python slaughterhouse.py
+
+      - name: Upload severed remains
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper_planes_strata
+          path: paper_planes_strata.zip
+
+      - name: Clean up the blood
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git rm -r inbox/* || true
+          git commit -m "chore: wipe inbox after slaughter" || true
+          git push || true
