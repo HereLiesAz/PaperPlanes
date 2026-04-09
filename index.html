@@ -9,7 +9,6 @@
         :root {
             --bg: #050505;
             --fg: #f0f0f0;
-            --accent: #333;
             --border: #444;
             --danger: #ff3333;
         }
@@ -32,96 +31,45 @@
             border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 15px;
             box-shadow: 5px 0 15px rgba(0,0,0,0.8);
             backdrop-filter: blur(5px);
         }
         h1 {
-            margin: 0 0 10px 0;
+            margin: 0 0 5px 0;
             font-size: 1.2rem;
             text-transform: uppercase;
             font-weight: normal;
             border-bottom: 1px solid var(--border);
             padding-bottom: 10px;
         }
-        .input-group {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-        label {
-            font-size: 0.8rem;
-            color: #888;
-            text-transform: uppercase;
-        }
+        .input-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 0.8rem; color: #888; text-transform: uppercase; }
         input {
-            background: transparent; 
-            color: var(--fg); 
-            border: 1px solid var(--border);
-            padding: 10px;
-            font-family: inherit;
-            outline: none;
-            transition: border-color 0.2s;
+            background: transparent; color: var(--fg); border: 1px solid var(--border);
+            padding: 8px; font-family: inherit; outline: none; transition: border-color 0.2s;
         }
-        input:focus {
-            border-color: var(--fg);
-        }
-        input[type="file"] {
-            padding: 10px 0;
-            border: none;
-        }
+        input:focus { border-color: var(--fg); }
+        input[type="file"] { padding: 10px 0; border: none; }
         input[type="file"]::file-selector-button {
-            background: transparent;
-            color: var(--fg);
-            border: 1px solid var(--border);
-            padding: 8px 15px;
-            cursor: pointer;
-            font-family: inherit;
-            transition: background 0.2s, color 0.2s;
+            background: transparent; color: var(--fg); border: 1px solid var(--border);
+            padding: 8px 15px; cursor: pointer; font-family: inherit; transition: background 0.2s, color 0.2s;
         }
-        input[type="file"]::file-selector-button:hover {
-            background: var(--fg);
-            color: var(--bg);
-        }
+        input[type="file"]::file-selector-button:hover { background: var(--fg); color: var(--bg); }
         button { 
-            background: transparent; 
-            color: var(--fg); 
-            border: 1px solid var(--fg);
-            padding: 15px;
-            font-family: inherit;
-            text-transform: uppercase;
-            cursor: pointer; 
-            transition: all 0.2s;
-            margin-top: 10px;
+            background: transparent; color: var(--fg); border: 1px solid var(--fg);
+            padding: 12px; font-family: inherit; text-transform: uppercase; cursor: pointer; 
+            transition: all 0.2s; margin-top: 5px;
         }
-        button:hover { 
-            background: var(--fg); 
-            color: var(--bg); 
-        }
-        
-        progress { 
-            width: 100%; 
-            appearance: none; 
-            height: 4px; 
-            border: none;
-            background: #222;
-        }
+        button:hover { background: var(--fg); color: var(--bg); }
+        progress { width: 100%; appearance: none; height: 4px; border: none; background: #222; }
         progress::-webkit-progress-bar { background: #222; }
         progress::-webkit-progress-value { background: var(--fg); transition: width 0.3s linear; }
         progress::-moz-progress-bar { background: var(--fg); }
-
         #log-container {
-            flex: 1;
-            overflow-y: auto;
-            background: #0a0a0a;
-            border: 1px solid var(--border);
-            padding: 10px;
-            font-size: 0.75rem;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            min-height: 150px;
-            max-height: 300px;
+            flex: 1; overflow-y: auto; background: #0a0a0a; border: 1px solid var(--border);
+            padding: 10px; font-size: 0.75rem; display: flex; flex-direction: column; gap: 6px;
+            min-height: 150px; max-height: 250px;
         }
         .log-entry { color: #888; }
         .log-success { color: #0f0; }
@@ -129,50 +77,26 @@
         .log-highlight { color: var(--fg); }
         .log-entry a, .log-success a { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
         .log-entry a:hover, .log-success a:hover { background: currentColor; color: #000; }
-
         #stage-container {
-            flex: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            perspective: 1200px;
-            background: radial-gradient(circle at center, #111 0%, #000 100%);
+            flex: 1; display: flex; justify-content: center; align-items: center;
+            perspective: 1200px; background: radial-gradient(circle at center, #111 0%, #000 100%);
         }
-        #stage { 
-            position: relative; 
-            transform-style: preserve-3d; 
-            width: 80vw; 
-            height: 80vh; 
-            transition: transform 0.1s linear; 
-        }
+        #stage { position: relative; transform-style: preserve-3d; width: 80vw; height: 80vh; transition: transform 0.1s linear; }
     </style>
 </head>
 <body>
     <div id="controls">
         <h1>Paper Planes</h1>
-        
-        <div class="input-group">
-            <label>Victim</label>
-            <input type="file" id="upload" accept="image/*">
-        </div>
-        
+        <div class="input-group"><label>GitHub PAT</label><input type="password" id="ghToken" placeholder="ghp_xxxxxxxx"></div>
+        <div class="input-group"><label>Repository</label><input type="text" id="ghRepo" placeholder="HereLiesAz/PaperPlanes"></div>
+        <div class="input-group"><label>Strata (2-256)</label><input type="number" id="numLayers" value="6" min="2" max="256"></div>
+        <div class="input-group"><label>Victim</label><input type="file" id="upload" accept="image/*"></div>
         <button id="executeBtn">Initiate Vivisection</button>
-        
         <progress id="progressBar" value="0" max="100"></progress>
-        <div id="log-container">
-            <div class="log-entry">> Awaiting input...</div>
-        </div>
+        <div id="log-container"><div class="log-entry">> Awaiting input...</div></div>
     </div>
-
-    <div id="stage-container">
-        <div id="stage"></div>
-    </div>
-
+    <div id="stage-container"><div id="stage"></div></div>
     <script type="module" src="app.js"></script>
-    <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js');
-        }
-    </script>
+    <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');</script>
 </body>
 </html>
