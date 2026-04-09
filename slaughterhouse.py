@@ -35,6 +35,8 @@ def generate_layer(layer_idx, combined_mask, img_array):
     return f"layer_{layer_idx:03d}.png", img_byte_arr.getvalue()
 
 def run_slaughter():
+    # flush=True is required or GitHub Actions will hide your dying screams
+    print("Summoning the neural weights...", flush=True)
     device = 0 if torch.cuda.is_available() else -1
 
     depth_pipe = pipeline(
@@ -51,22 +53,41 @@ def run_slaughter():
 
     inbox_files = glob.glob("inbox/*")
     if not inbox_files:
+        print("No victims found in the inbox.", flush=True)
         return
 
     target_file = inbox_files[0]
     
+    # Read the strata count from the victim's toe tag
     match = re.search(r'_layers-(\d+)\.', target_file)
     layers = int(match.group(1)) if match else 6
+    
+    print(f"Preparing to sever {layers} strata...", flush=True)
 
     original_img = Image.open(target_file).convert("RGB")
+    W, H = original_img.size
+    
+    # Force compliance with the limits of free infrastructure
+    MAX_DIM = 800
+    if max(H, W) > MAX_DIM:
+        scale = MAX_DIM / float(max(H, W))
+        new_W = int(W * scale)
+        new_H = int(H * scale)
+        original_img = original_img.resize((new_W, new_H), Image.LANCZOS)
+        print(f"Victim aggressively downscaled from {W}x{H} to {new_W}x{new_H} to prevent the void from collapsing.", flush=True)
+
     img_array = np.array(original_img)
     H, W = img_array.shape[:2]
     
+    print("Hallucinating the Z-axis...", flush=True)
     depth_output = depth_pipe(original_img)
     depth_array = np.array(depth_output["depth"])
     
     depth_min, depth_max = depth_array.min(), depth_array.max()
-    normalized_depth = ((depth_array - depth_min) / (depth_max - depth_min) * 255).astype(np.uint8)
+    if depth_max > depth_min:
+        normalized_depth = ((depth_array - depth_min) / (depth_max - depth_min) * 255).astype(np.uint8)
+    else:
+        normalized_depth = np.zeros_like(depth_array, dtype=np.uint8)
     
     if normalized_depth.shape[:2] != (H, W):
         normalized_depth = cv2.resize(
@@ -75,8 +96,10 @@ def run_slaughter():
             interpolation=cv2.INTER_LANCZOS4
         )
         
+    print("Isolating cohesive brushstrokes and agnostic forms...", flush=True)
     raw_segments = seg_pipe(original_img)
     
+    # Handle shifting dictionary structures from the pipeline
     if isinstance(raw_segments, dict) and "masks" in raw_segments:
         mask_list = list(raw_segments["masks"])
     elif isinstance(raw_segments, list):
@@ -90,6 +113,7 @@ def run_slaughter():
     layer_canvases = [np.zeros((H, W), dtype=bool) for _ in range(layers)]
     claimed_pixels = np.zeros((H, W), dtype=int) - 1 
     
+    print("Assigning forms to their definitive strata...", flush=True)
     for mask_item in mask_list:
         mask_array = np.array(mask_item)
         if mask_array.shape != (H, W):
@@ -109,6 +133,7 @@ def run_slaughter():
         layer_idx = max(0, min(layer_idx, layers - 1))
         claimed_pixels[mask_array] = layer_idx
 
+    print("Sweeping the unpainted void...", flush=True)
     unclaimed_mask = claimed_pixels == -1
     if np.any(unclaimed_mask):
         raw_depth_layers = np.digitize(normalized_depth, bin_edges) - 1
@@ -120,19 +145,15 @@ def run_slaughter():
 
     foreground_mask = (claimed_pixels > 0).astype(np.uint8) * 255
     
-    # Threading the physical labor. 
-    # ZipFile requires sequential writes, so we calculate the corpses concurrently 
-    # and shove them into the bag as soon as each thread finishes.
+    print("Threading the physical labor and packaging the remains...", flush=True)
     with zipfile.ZipFile("paper_planes_strata.zip", "w", zipfile.ZIP_DEFLATED) as zip_file:
         with ThreadPoolExecutor() as executor:
             futures = []
             
-            # Dispatch the heavy inpainting task
             futures.append(
                 executor.submit(generate_background, img_array, foreground_mask)
             )
             
-            # Dispatch the PNG compression and blurring for each shard
             for i in range(1, layers):
                 combined_mask = layer_canvases[i]
                 if np.any(combined_mask):
@@ -140,12 +161,15 @@ def run_slaughter():
                         executor.submit(generate_layer, i, combined_mask, img_array)
                     )
             
-            # Catch the severed remains as they fall from the blade
             for future in as_completed(futures):
                 result = future.result()
                 if result:
                     filename, byte_data = result
                     zip_file.writestr(filename, byte_data)
+                    print(f"Severed {filename}", flush=True)
+
+    print("Vivisection complete. Artifact packaged.", flush=True)
 
 if __name__ == "__main__":
     run_slaughter()
+
