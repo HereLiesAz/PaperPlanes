@@ -3,8 +3,8 @@ const executeBtn = document.getElementById('executeBtn');
 const statusDiv = document.getElementById('status');
 
 // Point this to your new serverless tollbooth
-const CLOUDFLARE_WORKER_URL = 'https://your-worker-name.your-subdomain.workers.dev'; 
-const GH_REPO = 'HereLiesAz/paper-planes'; // Still needed to poll for the public zip file
+const CLOUDFLARE_WORKER_URL = 'https://paperplanes.hereliesaz.workers.dev/'; 
+const GH_REPO = 'HereLiesAz/paperplanes';
 
 executeBtn.addEventListener('click', async () => {
     const file = uploadInput.files[0];
