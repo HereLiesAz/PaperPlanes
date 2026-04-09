@@ -8,6 +8,31 @@ import glob
 import re
 from PIL import Image
 from transformers import pipeline
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def generate_background(img_array, foreground_mask):
+    """The slow, agonizing smear of the void."""
+    kernel = np.ones((25, 25), np.uint8)
+    dilated_mask = cv2.dilate(foreground_mask, kernel, iterations=1)
+    inpainted_bg = cv2.inpaint(img_array, dilated_mask, inpaintRadius=30, flags=cv2.INPAINT_TELEA)
+    
+    bg_byte_arr = io.BytesIO()
+    Image.fromarray(inpainted_bg).save(bg_byte_arr, format='PNG')
+    return "layer_000.png", bg_byte_arr.getvalue()
+
+def generate_layer(layer_idx, combined_mask, img_array):
+    """The quick, violent extraction of a single ghost."""
+    if not np.any(combined_mask):
+        return None
+        
+    mask_smoothed = cv2.GaussianBlur((combined_mask * 255).astype(np.uint8), (3, 3), 0)
+    layer_rgba = np.zeros((img_array.shape[0], img_array.shape[1], 4), dtype=np.uint8)
+    layer_rgba[..., :3] = img_array
+    layer_rgba[..., 3] = mask_smoothed
+    
+    img_byte_arr = io.BytesIO()
+    Image.fromarray(layer_rgba).save(img_byte_arr, format='PNG')
+    return f"layer_{layer_idx:03d}.png", img_byte_arr.getvalue()
 
 def run_slaughter():
     device = 0 if torch.cuda.is_available() else -1
@@ -30,7 +55,6 @@ def run_slaughter():
 
     target_file = inbox_files[0]
     
-    # Read the strata count from the victim's toe tag
     match = re.search(r'_layers-(\d+)\.', target_file)
     layers = int(match.group(1)) if match else 6
 
@@ -53,7 +77,6 @@ def run_slaughter():
         
     raw_segments = seg_pipe(original_img)
     
-    # Extract the masks regardless of how the pipeline structures the dictionary
     if isinstance(raw_segments, dict) and "masks" in raw_segments:
         mask_list = list(raw_segments["masks"])
     elif isinstance(raw_segments, list):
@@ -61,7 +84,6 @@ def run_slaughter():
     else:
         mask_list = []
 
-    # Sort masks by area (largest to smallest)
     mask_list.sort(key=lambda m: np.sum(np.array(m) > 0), reverse=True)
 
     bin_edges = np.linspace(0, 256, layers + 1)
@@ -98,29 +120,32 @@ def run_slaughter():
 
     foreground_mask = (claimed_pixels > 0).astype(np.uint8) * 255
     
-    kernel = np.ones((25, 25), np.uint8)
-    dilated_mask = cv2.dilate(foreground_mask, kernel, iterations=1)
-    
-    inpainted_bg = cv2.inpaint(img_array, dilated_mask, inpaintRadius=30, flags=cv2.INPAINT_TELEA)
-
+    # Threading the physical labor. 
+    # ZipFile requires sequential writes, so we calculate the corpses concurrently 
+    # and shove them into the bag as soon as each thread finishes.
     with zipfile.ZipFile("paper_planes_strata.zip", "w", zipfile.ZIP_DEFLATED) as zip_file:
-        bg_byte_arr = io.BytesIO()
-        Image.fromarray(inpainted_bg).save(bg_byte_arr, format='PNG')
-        zip_file.writestr("layer_000.png", bg_byte_arr.getvalue())
-
-        for i in range(1, layers):
-            combined_mask = layer_canvases[i]
-            if not np.any(combined_mask):
-                continue
-                
-            mask_smoothed = cv2.GaussianBlur((combined_mask * 255).astype(np.uint8), (3, 3), 0)
-            layer_rgba = np.zeros((H, W, 4), dtype=np.uint8)
-            layer_rgba[..., :3] = img_array
-            layer_rgba[..., 3] = mask_smoothed
+        with ThreadPoolExecutor() as executor:
+            futures = []
             
-            img_byte_arr = io.BytesIO()
-            Image.fromarray(layer_rgba).save(img_byte_arr, format='PNG')
-            zip_file.writestr(f"layer_{i:03d}.png", img_byte_arr.getvalue())
+            # Dispatch the heavy inpainting task
+            futures.append(
+                executor.submit(generate_background, img_array, foreground_mask)
+            )
+            
+            # Dispatch the PNG compression and blurring for each shard
+            for i in range(1, layers):
+                combined_mask = layer_canvases[i]
+                if np.any(combined_mask):
+                    futures.append(
+                        executor.submit(generate_layer, i, combined_mask, img_array)
+                    )
+            
+            # Catch the severed remains as they fall from the blade
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    filename, byte_data = result
+                    zip_file.writestr(filename, byte_data)
 
 if __name__ == "__main__":
     run_slaughter()
