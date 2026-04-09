@@ -44,11 +44,12 @@ def run_slaughter():
     match = re.search(r'_layers-(\d+)\.', target_file)
     layers = int(match.group(1)) if match else 6
 
-    print(f"Preparing to sever {layers} strata based on perceptual gravity...", flush=True)
+    print(f"Preparing to sever {layers} strata using Dual-Axis Perceptual Dissection...", flush=True)
 
     original_img = Image.open(target_file).convert("RGB")
     W, H = original_img.size
     
+    # The 800px chokehold to prevent cloud executioners from killing the process
     MAX_DIM = 800
     if max(H, W) > MAX_DIM:
         scale = MAX_DIM / float(max(H, W))
@@ -77,8 +78,8 @@ def run_slaughter():
         return
 
     processed_masks = []
-    composite_weights = []
     
+    print("Weighing the silence of each shard...", flush=True)
     for mask_item in mask_list:
         mask_array = np.array(mask_item)
         if mask_array.shape != (H, W):
@@ -87,6 +88,7 @@ def run_slaughter():
             mask_array = mask_array > 0
         
         area = np.sum(mask_array)
+        # Exclude massive catch-all boxes and microscopic static
         if area > 10 and area < (TOTAL_PIXELS * 0.95):
             masked_L = L_channel[mask_array]
             masked_A = A_channel[mask_array]
@@ -95,42 +97,46 @@ def run_slaughter():
             std_L = np.std(masked_L) if len(masked_L) > 0 else 0
             std_C = np.sqrt(np.std(masked_A)**2 + np.std(masked_B)**2) if len(masked_A) > 0 else 0
 
-            norm_std_L = std_L / 255.0
-            norm_std_C = std_C / 255.0
+            # Normalize variance. 128 represents extreme contrast within a single shape.
+            norm_L = min(1.0, std_L / 128.0)
+            norm_C = min(1.0, std_C / 128.0)
 
-            light_smoothness = max(0.0, 1.0 - norm_std_L)
-            color_smoothness = max(0.0, 1.0 - norm_std_C)
+            # Calculate pure Smoothness. 1.0 is dead flat concrete. 0.0 is chaotic graffiti.
+            # Lightness dictates the gravity twice as much as Color.
+            smoothness = 1.0 - ((2.0 * norm_L + norm_C) / 3.0)
 
-            smoothness_factor = (2.0 * light_smoothness + 1.0 * color_smoothness) / 3.0
+            processed_masks.append({
+                'mask': mask_array,
+                'area': area,
+                'smoothness': smoothness
+            })
 
-            base_weight = np.log1p(area)
-            final_weight = base_weight * smoothness_factor
+    if not processed_masks:
+        print("No valid shards survived the filter. Aborting.", flush=True)
+        return
 
-            processed_masks.append(mask_array)
-            composite_weights.append(final_weight)
-
-    composite_weights = np.array(composite_weights)
+    # PHASE 1: Determine Depth based STRICTLY on Smoothness.
+    # Sort from quietest (1.0) to loudest (0.0)
+    processed_masks.sort(key=lambda x: x['smoothness'], reverse=True)
     
-    sort_idx = np.argsort(composite_weights)[::-1]
-    processed_masks = [processed_masks[i] for i in sort_idx]
-    composite_weights = np.array([composite_weights[i] for i in sort_idx])
+    # Force an even distribution of shards across all strata to prevent clumping
+    masks_per_layer = max(1, len(processed_masks) // layers)
+    for idx, m in enumerate(processed_masks):
+        assigned_layer = min(idx // masks_per_layer, layers - 1)
+        m['layer'] = assigned_layer
 
-    min_w, max_w = composite_weights.min(), composite_weights.max()
-    bin_edges = np.linspace(min_w, max_w, layers)
-    
+    # PHASE 2: Determine Overwrite Order based STRICTLY on Area.
+    # The Painter's Algorithm: Sort from largest real estate to smallest details.
+    processed_masks.sort(key=lambda x: x['area'], reverse=True)
+
     layer_canvases = [np.zeros((H, W), dtype=bool) for _ in range(layers)]
     claimed_pixels = np.zeros((H, W), dtype=int) - 1 
 
-    print("Stacking the shards from background to foreground...", flush=True)
-    for idx, mask_array in enumerate(processed_masks):
-        weight = composite_weights[idx]
-        
-        layer_idx = np.digitize(weight, bin_edges) - 1
-        layer_idx = np.clip(layer_idx, 0, layers - 1)
-        
-        layer_idx = (layers - 1) - layer_idx
-        
-        claimed_pixels[mask_array] = layer_idx
+    print("Collaging the canvas from back to front...", flush=True)
+    for m in processed_masks:
+        # Because we iterate largest to smallest, the tiny loud details 
+        # will punch clean holes through the massive quiet concrete slabs.
+        claimed_pixels[m['mask']] = m['layer']
 
     unclaimed_mask = claimed_pixels == -1
     claimed_pixels[unclaimed_mask] = 0
