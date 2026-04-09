@@ -11,16 +11,12 @@ from transformers import pipeline
 def run_slaughter():
     device = 0 if torch.cuda.is_available() else -1
 
-    print("Summoning the neural weights...")
-    # The Seer of Distance. (Surprisingly robust on paintings due to diverse training data).
     depth_pipe = pipeline(
         task="depth-estimation", 
         model="depth-anything/Depth-Anything-V2-Small-hf", 
         device=device
     )
     
-    # The Blind Discriminator. 
-    # SAM (Segment Anything) doesn't need to know what an object is to cut it out.
     seg_pipe = pipeline(
         task="mask-generation", 
         model="facebook/sam-vit-base", 
@@ -29,7 +25,6 @@ def run_slaughter():
 
     inbox_files = glob.glob("inbox/*")
     if not inbox_files:
-        print("No victims found in the inbox.")
         return
 
     target_file = inbox_files[0]
@@ -39,7 +34,6 @@ def run_slaughter():
     img_array = np.array(original_img)
     H, W = img_array.shape[:2]
     
-    print("Hallucinating the Z-axis...")
     depth_output = depth_pipe(original_img)
     depth_array = np.array(depth_output["depth"])
     
@@ -53,24 +47,15 @@ def run_slaughter():
             interpolation=cv2.INTER_LANCZOS4
         )
         
-    print("Isolating cohesive brushstrokes and agnostic forms...")
-    # SAM returns overlapping masks of everything it perceives as a distinct visual entity.
     segments = seg_pipe(original_img)
-    
-    # Sort masks by area (largest to smallest) so smaller foreground details 
-    # overwrite larger background swaths when establishing pixel ownership.
     segments.sort(key=lambda x: np.sum(np.array(x["mask"])), reverse=True)
 
     bin_edges = np.linspace(0, 256, layers + 1)
     layer_canvases = [np.zeros((H, W), dtype=bool) for _ in range(layers)]
-    
-    # Track which pixels have been claimed by an object to sweep up the rest later.
     claimed_pixels = np.zeros((H, W), dtype=int) - 1 
     
-    print("Assigning forms to their definitive strata...")
     for segment in segments:
         mask_array = np.array(segment["mask"])
-        
         if mask_array.shape != (H, W):
             mask_array = cv2.resize(
                 mask_array.astype(np.uint8), 
@@ -83,37 +68,39 @@ def run_slaughter():
         if not np.any(mask_array):
             continue
             
-        # The entire cohesive painted form is flattened to its median depth.
         median_z = np.median(normalized_depth[mask_array])
-        
         layer_idx = np.digitize(median_z, bin_edges) - 1
         layer_idx = max(0, min(layer_idx, layers - 1))
-        
-        # Overwrite pixel ownership with this shape's designated layer
         claimed_pixels[mask_array] = layer_idx
 
-    print("Sweeping the unpainted void...")
-    # Any pixels SAM failed to group into a cohesive shape fall back to their raw depth.
     unclaimed_mask = claimed_pixels == -1
     if np.any(unclaimed_mask):
         raw_depth_layers = np.digitize(normalized_depth, bin_edges) - 1
         raw_depth_layers = np.clip(raw_depth_layers, 0, layers - 1)
         claimed_pixels[unclaimed_mask] = raw_depth_layers[unclaimed_mask]
 
-    # Transfer the final ownership map into the discrete layer canvases
     for i in range(layers):
         layer_canvases[i] = (claimed_pixels == i)
 
-    print("Packaging the severed remains...")
+    foreground_mask = (claimed_pixels > 0).astype(np.uint8) * 255
+    
+    # Aggressively dilate the wound so Telea cannot sample the corpse's edges
+    kernel = np.ones((25, 25), np.uint8)
+    dilated_mask = cv2.dilate(foreground_mask, kernel, iterations=1)
+    
+    inpainted_bg = cv2.inpaint(img_array, dilated_mask, inpaintRadius=30, flags=cv2.INPAINT_TELEA)
+
     with zipfile.ZipFile("paper_planes_strata.zip", "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for i in range(layers):
+        bg_byte_arr = io.BytesIO()
+        Image.fromarray(inpainted_bg).save(bg_byte_arr, format='PNG')
+        zip_file.writestr("layer_000.png", bg_byte_arr.getvalue())
+
+        for i in range(1, layers):
             combined_mask = layer_canvases[i]
-            
             if not np.any(combined_mask):
                 continue
                 
             mask_smoothed = cv2.GaussianBlur((combined_mask * 255).astype(np.uint8), (3, 3), 0)
-            
             layer_rgba = np.zeros((H, W, 4), dtype=np.uint8)
             layer_rgba[..., :3] = img_array
             layer_rgba[..., 3] = mask_smoothed
@@ -121,8 +108,6 @@ def run_slaughter():
             img_byte_arr = io.BytesIO()
             Image.fromarray(layer_rgba).save(img_byte_arr, format='PNG')
             zip_file.writestr(f"layer_{i:03d}.png", img_byte_arr.getvalue())
-
-    print("Vivisection complete. Artifact packaged.")
 
 if __name__ == "__main__":
     run_slaughter()
