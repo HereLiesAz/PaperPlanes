@@ -1,4 +1,4 @@
-const CACHE_NAME = 'paper-planes-v4';
+const CACHE_NAME = 'paper-planes-v6';
 const ASSETS = [
     './',
     './index.html',
@@ -8,18 +8,14 @@ const ASSETS = [
 
 self.addEventListener('install', event => {
     self.skipWaiting();
-    event.waitUntil(
-        caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
-    );
+    event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)));
 });
 
 self.addEventListener('activate', event => {
     event.waitUntil(
-        caches.keys().then(keys => {
-            return Promise.all(
-                keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
-            );
-        })
+        caches.keys().then(keys => Promise.all(
+            keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+        ))
     );
     return self.clients.claim();
 });
@@ -34,9 +30,7 @@ self.addEventListener('fetch', event => {
                         return fetchRes;
                     });
                 })
-                .catch(() => {
-                    return caches.match(event.request);
-                })
+                .catch(() => caches.match(event.request))
         );
     }
 });
