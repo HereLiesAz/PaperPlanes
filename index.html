@@ -3,41 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The Slaughterhouse</title>
+    <title>PaperPlanes Segmentation</title>
     <style>
-        body { background: #0a0a0a; color: #d0d0d0; font-family: monospace; padding: 2rem; display: flex; justify-content: center; }
-        .labyrinth { background: #111; border: 1px solid #333; padding: 2rem; width: 100%; max-width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
-        h1 { color: #880000; font-size: 1.2rem; text-transform: uppercase; border-bottom: 1px solid #333; padding-bottom: 1rem; margin-top: 0; }
-        .sacrifice { margin-bottom: 1.5rem; background: #1a1a1a; padding: 1rem; border: 1px dashed #444; }
-        label { display: block; margin-bottom: 0.5rem; color: #888; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; }
-        input[type="file"] { width: 100%; color: #aaa; cursor: pointer; }
-        .strata-control { margin-bottom: 2rem; }
-        input[type="range"] { width: 100%; cursor: ew-resize; accent-color: #880000; }
-        button { width: 100%; padding: 1rem; background: #880000; color: #fff; border: none; font-family: monospace; font-size: 1rem; font-weight: bold; text-transform: uppercase; cursor: pointer; letter-spacing: 2px; transition: background 0.2s; }
-        button:hover { background: #aa0000; }
-        #status { margin-top: 1.5rem; text-align: center; color: #666; font-style: italic; min-height: 1.5rem; }
+        body { background: #121212; color: #e0e0e0; font-family: system-ui, -apple-system, sans-serif; padding: 2rem; display: flex; justify-content: center; }
+        .container { background: #1e1e1e; border: 1px solid #333; padding: 2rem; width: 100%; max-width: 500px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        h1 { font-size: 1.5rem; border-bottom: 1px solid #333; padding-bottom: 1rem; margin-top: 0; }
+        .input-group { margin-bottom: 1.5rem; background: #252525; padding: 1rem; border-radius: 4px; border: 1px solid #444; }
+        label { display: block; margin-bottom: 0.5rem; color: #aaa; font-size: 0.9rem; font-weight: 500; }
+        input[type="file"] { width: 100%; color: #ccc; cursor: pointer; }
+        .slider-control { margin-bottom: 2rem; }
+        input[type="range"] { width: 100%; cursor: pointer; }
+        button { width: 100%; padding: 1rem; background: #007bff; color: #fff; border: none; font-size: 1rem; font-weight: 600; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: #0056b3; }
+        #status { margin-top: 1.5rem; text-align: center; color: #888; font-size: 0.9rem; min-height: 1.5rem; }
     </style>
 </head>
 <body>
 
-    <div class="labyrinth">
-        <h1>Autonomous Vivisection</h1>
+    <div class="container">
+        <h1>PaperPlanes Pipeline</h1>
 
-        <div class="sacrifice">
-            <label for="originalInput">The Corpse (Original Photograph)</label>
-            <input type="file" id="originalInput" accept="image/png, image/jpeg">
+        <div class="input-group">
+            <label for="sourceInput">Source Image</label>
+            <input type="file" id="sourceInput" accept="image/png, image/jpeg">
         </div>
 
-        <div class="strata-control">
-            <label for="layersInput">Strata Count: <span id="layerDisplay">6</span></label>
+        <div class="slider-control">
+            <label for="layersInput">Target Layers: <span id="layerDisplay">6</span></label>
             <input type="range" id="layersInput" min="2" max="12" value="6">
         </div>
 
-        <button id="butcherBtn">Drop the Blade</button>
-        <div id="status">Awaiting the single victim...</div>
+        <button id="processBtn">Run Pipeline</button>
+        <div id="status">Ready.</div>
     </div>
 
-    <script type="module" src="app.js?v=autonomous_single_input"></script>
+    <script type="module" src="app.js"></script>
     
     <script>
         const slider = document.getElementById('layersInput');
