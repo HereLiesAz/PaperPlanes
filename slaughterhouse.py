@@ -12,16 +12,18 @@ def run_slaughter():
     device = 0 if torch.cuda.is_available() else -1
 
     print("Summoning the neural weights...")
+    # The Seer of Distance. (Surprisingly robust on paintings due to diverse training data).
     depth_pipe = pipeline(
         task="depth-estimation", 
         model="depth-anything/Depth-Anything-V2-Small-hf", 
         device=device
     )
     
-    # We return to the Panoptic Segmenter to enforce semantic boundaries.
+    # The Blind Discriminator. 
+    # SAM (Segment Anything) doesn't need to know what an object is to cut it out.
     seg_pipe = pipeline(
-        task="image-segmentation", 
-        model="facebook/detr-resnet-50-panoptic", 
+        task="mask-generation", 
+        model="facebook/sam-vit-base", 
         device=device
     )
 
@@ -51,45 +53,56 @@ def run_slaughter():
             interpolation=cv2.INTER_LANCZOS4
         )
         
-    print("Interrogating reality for semantic meaning...")
-    # Panoptic segmentation forces every pixel into a conceptual category.
+    print("Isolating cohesive brushstrokes and agnostic forms...")
+    # SAM returns overlapping masks of everything it perceives as a distinct visual entity.
     segments = seg_pipe(original_img)
     
+    # Sort masks by area (largest to smallest) so smaller foreground details 
+    # overwrite larger background swaths when establishing pixel ownership.
+    segments.sort(key=lambda x: np.sum(np.array(x["mask"])), reverse=True)
+
     bin_edges = np.linspace(0, 256, layers + 1)
     layer_canvases = [np.zeros((H, W), dtype=bool) for _ in range(layers)]
-    claimed_pixels = np.zeros((H, W), dtype=bool)
     
-    print("Assigning concepts to their definitive strata...")
+    # Track which pixels have been claimed by an object to sweep up the rest later.
+    claimed_pixels = np.zeros((H, W), dtype=int) - 1 
+    
+    print("Assigning forms to their definitive strata...")
     for segment in segments:
         mask_array = np.array(segment["mask"])
         
         if mask_array.shape != (H, W):
             mask_array = cv2.resize(
-                mask_array, 
+                mask_array.astype(np.uint8), 
                 (W, H), 
                 interpolation=cv2.INTER_NEAREST
-            )
-        
-        binary_mask = mask_array > 0
-        if not np.any(binary_mask):
+            ).astype(bool)
+        else:
+            mask_array = mask_array > 0
+
+        if not np.any(mask_array):
             continue
             
-        # The entire semantic object is flattened to its median depth.
-        # This prevents gradients from tearing a single object across multiple layers.
-        median_z = np.median(normalized_depth[binary_mask])
+        # The entire cohesive painted form is flattened to its median depth.
+        median_z = np.median(normalized_depth[mask_array])
         
         layer_idx = np.digitize(median_z, bin_edges) - 1
         layer_idx = max(0, min(layer_idx, layers - 1))
         
-        layer_canvases[layer_idx] = np.logical_or(layer_canvases[layer_idx], binary_mask)
-        claimed_pixels = np.logical_or(claimed_pixels, binary_mask)
+        # Overwrite pixel ownership with this shape's designated layer
+        claimed_pixels[mask_array] = layer_idx
 
-    # In the rare event the panoptic model experiences a lapse in judgment 
-    # and leaves a pocket of reality unnamed, we banish the amnesiac void 
-    # to the absolute background so it doesn't leave literal holes in the image.
-    unclaimed_mask = ~claimed_pixels
+    print("Sweeping the unpainted void...")
+    # Any pixels SAM failed to group into a cohesive shape fall back to their raw depth.
+    unclaimed_mask = claimed_pixels == -1
     if np.any(unclaimed_mask):
-        layer_canvases[0] = np.logical_or(layer_canvases[0], unclaimed_mask)
+        raw_depth_layers = np.digitize(normalized_depth, bin_edges) - 1
+        raw_depth_layers = np.clip(raw_depth_layers, 0, layers - 1)
+        claimed_pixels[unclaimed_mask] = raw_depth_layers[unclaimed_mask]
+
+    # Transfer the final ownership map into the discrete layer canvases
+    for i in range(layers):
+        layer_canvases[i] = (claimed_pixels == i)
 
     print("Packaging the severed remains...")
     with zipfile.ZipFile("paper_planes_strata.zip", "w", zipfile.ZIP_DEFLATED) as zip_file:
