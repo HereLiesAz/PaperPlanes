@@ -1,4 +1,4 @@
-const CACHE_NAME = 'paper-planes-v3';
+const CACHE_NAME = 'paper-planes-v4';
 const ASSETS = [
     './',
     './index.html',
@@ -25,7 +25,6 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-    // Network-first protocol. If the server is dead, fall back to the void.
     if (event.request.url.startsWith(self.location.origin)) {
         event.respondWith(
             fetch(event.request)
