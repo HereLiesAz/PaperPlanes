@@ -15,7 +15,6 @@
             display: flex; 
             flex-direction: column; 
             height: 100vh; 
-            perspective: 1200px; 
         }
         #controls { 
             padding: 15px; 
@@ -25,47 +24,34 @@
             left: 0; 
             background: rgba(0,0,0,0.85); 
             border-bottom-right-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 300px;
         }
-        #stage-container { 
-            flex: 1; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            overflow: hidden; 
+        input, button {
+            background: #222; 
+            color: #fff; 
+            border: 1px solid #555;
+            padding: 5px;
+            font-family: monospace;
         }
-        #stage { 
-            position: relative; 
-            transform-style: preserve-3d; 
-            width: 80vw; 
-            height: 80vh; 
-            transition: transform 0.1s linear; 
-        }
-        .layer { 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
-            height: 100%; 
-            object-fit: contain; 
-            pointer-events: none; 
-            /* Feathering the jagged edges of reality */
-            filter: drop-shadow(0px 0px 2px rgba(0,0,0,0.5));
-        }
-        #loading { 
-            display: none; 
-            margin-top: 10px; 
+        button { cursor: pointer; background: #333; }
+        button:hover { background: #555; }
+        #status { 
             color: #ff3333; 
+            font-weight: bold;
+            word-wrap: break-word;
         }
     </style>
 </head>
 <body>
     <div id="controls">
-        <input type="file" id="upload" accept="image/*"><br><br>
-        <label>Strata: <input type="number" id="numLayers" value="6" min="2" max="15" style="width:45px; background:#222; color:#fff; border:1px solid #555;"></label>
-        <div id="loading">Summoning neural weights...</div>
-    </div>
-    <div id="stage-container">
-        <div id="stage"></div>
+        <label>GitHub PAT (repo scope):<br><input type="password" id="ghToken" style="width:100%;"></label>
+        <label>Repo (Owner/Name):<br><input type="text" id="ghRepo" placeholder="HereLiesAz/paper-planes" style="width:100%;"></label>
+        <input type="file" id="upload" accept="image/*">
+        <button id="executeBtn">Send to the Slaughterhouse</button>
+        <div id="status">Awaiting victim...</div>
     </div>
 
     <script type="module" src="app.js"></script>
