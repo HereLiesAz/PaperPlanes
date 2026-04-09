@@ -1,20 +1,34 @@
 const uploadInput = document.getElementById('upload');
 const executeBtn = document.getElementById('executeBtn');
-const statusDiv = document.getElementById('status');
+const logContainer = document.getElementById('log-container');
+const progressBar = document.getElementById('progressBar');
 
-// Point this to your new serverless tollbooth
 const CLOUDFLARE_WORKER_URL = 'https://paperplanes.hereliesaz.workers.dev/'; 
-const GH_REPO = 'HereLiesAz/paperplanes';
+const GH_REPO = 'HereLiesAz/paper-planes';
+
+function logMsg(msg, type = 'entry') {
+    const el = document.createElement('div');
+    el.className = `log-${type}`;
+    el.innerHTML = `> ${msg}`;
+    logContainer.appendChild(el);
+    logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+function updateProgress(percent) {
+    progressBar.value = percent;
+}
 
 executeBtn.addEventListener('click', async () => {
     const file = uploadInput.files[0];
 
     if (!file) {
-        statusDiv.innerText = "Error: Missing victim.";
+        logMsg("Error: Missing victim.", "error");
         return;
     }
 
-    statusDiv.innerText = "Encoding victim...";
+    logContainer.innerHTML = '';
+    updateProgress(5);
+    logMsg("Encoding victim...", "highlight");
     
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -22,9 +36,9 @@ executeBtn.addEventListener('click', async () => {
         const filename = `victim_${Date.now()}.${file.name.split('.').pop()}`;
         
         try {
-            statusDiv.innerText = "Handing victim to the proxy...";
+            updateProgress(15);
+            logMsg("Handing victim to the proxy...");
             
-            // The browser talks to Cloudflare, Cloudflare talks to GitHub.
             const proxyRes = await fetch(CLOUDFLARE_WORKER_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -33,16 +47,15 @@ executeBtn.addEventListener('click', async () => {
 
             if (!proxyRes.ok) throw new Error(await proxyRes.text());
 
-            statusDiv.innerText = "Victim committed. Polling public Actions API for execution...";
+            updateProgress(30);
+            logMsg("Victim committed. Polling public Actions API for execution...", "success");
             
             await new Promise(r => setTimeout(r, 5000));
-            
-            // Note: The PWA can poll the public runs/artifacts API without a token 
-            // ONLY IF the repository is completely public.
             pollForArtifact(GH_REPO);
 
         } catch (err) {
-            statusDiv.innerText = `Catastrophe: ${err.message}`;
+            updateProgress(0);
+            logMsg(`Catastrophe: ${err.message}`, "error");
         }
     };
     reader.readAsDataURL(file);
@@ -54,16 +67,19 @@ async function pollForArtifact(repo) {
 
     const interval = setInterval(async () => {
         attempts++;
+        const percent = 30 + ((attempts / maxAttempts) * 60);
+        updateProgress(percent);
+
         if (attempts > maxAttempts) {
             clearInterval(interval);
-            statusDiv.innerText = "Timeout: The machines took too long.";
+            updateProgress(0);
+            logMsg("Timeout: The machines took too long.", "error");
             return;
         }
 
         try {
-            statusDiv.innerText = `Listening for the blade... (Attempt ${attempts}/60)`;
+            logMsg(`Listening for the blade... (Attempt ${attempts}/${maxAttempts})`);
             
-            // Fetching public workflow runs doesn't require auth
             const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/runs?event=push&per_page=1`);
             const runsData = await runsRes.json();
             
@@ -74,27 +90,29 @@ async function pollForArtifact(repo) {
                     clearInterval(interval);
                     
                     if (latestRun.conclusion !== 'success') {
-                        statusDiv.innerText = `The slaughter failed. Conclusion: ${latestRun.conclusion}`;
+                        updateProgress(0);
+                        logMsg(`The slaughter failed. Conclusion: ${latestRun.conclusion}`, "error");
                         return;
                     }
 
-                    statusDiv.innerText = "Retrieving severed remains...";
+                    updateProgress(95);
+                    logMsg("Retrieving severed remains...", "highlight");
                     
                     const artifactsRes = await fetch(latestRun.artifacts_url);
                     const artifactsData = await artifactsRes.json();
                     
                     if (artifactsData.artifacts && artifactsData.artifacts.length > 0) {
+                        updateProgress(100);
                         const artifact = artifactsData.artifacts[0];
-                        // Downloading public artifacts from the API requires jumping through hoops.
-                        // It is easier to point the user directly to the run page.
-                        statusDiv.innerHTML = `<a href="${latestRun.html_url}" target="_blank" style="color:#0f0;">Click here to claim paper_planes_strata.zip from the Run artifacts</a>`;
+                        logMsg(`<a href="${latestRun.html_url}" target="_blank">Click here to claim paper_planes_strata.zip from the Run artifacts</a>`, "success");
                     } else {
-                        statusDiv.innerText = "No artifact found. The void consumed it.";
+                        updateProgress(0);
+                        logMsg("No artifact found. The void consumed it.", "error");
                     }
                 }
             }
         } catch (err) {
-            console.error(err);
+            logMsg(`Polling error: ${err.message}`, "error");
         }
     }, 5000);
 }
