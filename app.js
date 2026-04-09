@@ -1,10 +1,11 @@
 const uploadInput = document.getElementById('upload');
+const numLayersInput = document.getElementById('numLayers');
 const executeBtn = document.getElementById('executeBtn');
 const logContainer = document.getElementById('log-container');
 const progressBar = document.getElementById('progressBar');
 
 const CLOUDFLARE_WORKER_URL = 'https://paperplanes.hereliesaz.workers.dev/'; 
-const GH_REPO = 'HereLiesAz/paper-planes';
+const GH_REPO = 'HereLiesAz/PaperPlanes';
 
 function logMsg(msg, type = 'entry') {
     const el = document.createElement('div');
@@ -20,6 +21,7 @@ function updateProgress(percent) {
 
 executeBtn.addEventListener('click', async () => {
     const file = uploadInput.files[0];
+    const layers = parseInt(numLayersInput.value) || 6;
 
     if (!file) {
         logMsg("Error: Missing victim.", "error");
@@ -28,12 +30,12 @@ executeBtn.addEventListener('click', async () => {
 
     logContainer.innerHTML = '';
     updateProgress(5);
-    logMsg("Encoding victim...", "highlight");
+    logMsg(`Encoding victim for ${layers} strata...`, "highlight");
     
     const reader = new FileReader();
     reader.onload = async (e) => {
         const base64Content = e.target.result.split(',')[1];
-        const filename = `victim_${Date.now()}.${file.name.split('.').pop()}`;
+        const filename = `victim_${Date.now()}_layers-${layers}.${file.name.split('.').pop()}`;
         
         try {
             updateProgress(15);
@@ -48,7 +50,7 @@ executeBtn.addEventListener('click', async () => {
             if (!proxyRes.ok) throw new Error(await proxyRes.text());
 
             updateProgress(30);
-            logMsg("Victim committed. Polling public Actions API for execution...", "success");
+            logMsg("Victim committed. Forcing the API to acknowledge the new timeline...", "success");
             
             await new Promise(r => setTimeout(r, 5000));
             pollForArtifact(GH_REPO);
@@ -64,6 +66,7 @@ executeBtn.addEventListener('click', async () => {
 async function pollForArtifact(repo) {
     const maxAttempts = 60; 
     let attempts = 0;
+    let activeRunId = null;
 
     const interval = setInterval(async () => {
         attempts++;
@@ -78,36 +81,55 @@ async function pollForArtifact(repo) {
         }
 
         try {
-            logMsg(`Listening for the blade... (Attempt ${attempts}/${maxAttempts})`);
-            
-            const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/runs?event=push&per_page=1`);
+            // Force the browser to pull fresh data, no caching allowed.
+            const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/runs?event=push&per_page=1`, {
+                cache: 'no-store'
+            });
             const runsData = await runsRes.json();
             
             if (runsData.workflow_runs && runsData.workflow_runs.length > 0) {
                 const latestRun = runsData.workflow_runs[0];
                 
-                if (latestRun.status === 'completed') {
-                    clearInterval(interval);
-                    
-                    if (latestRun.conclusion !== 'success') {
-                        updateProgress(0);
-                        logMsg(`The slaughter failed. Conclusion: ${latestRun.conclusion}`, "error");
-                        return;
-                    }
-
-                    updateProgress(95);
-                    logMsg("Retrieving severed remains...", "highlight");
-                    
-                    const artifactsRes = await fetch(latestRun.artifacts_url);
-                    const artifactsData = await artifactsRes.json();
-                    
-                    if (artifactsData.artifacts && artifactsData.artifacts.length > 0) {
-                        updateProgress(100);
-                        const artifact = artifactsData.artifacts[0];
-                        logMsg(`<a href="${latestRun.html_url}" target="_blank">Click here to claim paper_planes_strata.zip from the Run artifacts</a>`, "success");
+                // If we haven't locked onto the new run yet
+                if (!activeRunId) {
+                    // Ignore ghosts. If it's already complete, it's an old run.
+                    if (latestRun.status === 'completed') {
+                        logMsg(`Waiting for GitHub to wake up... (Attempt ${attempts}/${maxAttempts})`);
+                        return; 
                     } else {
-                        updateProgress(0);
-                        logMsg("No artifact found. The void consumed it.", "error");
+                        // The new container has spawned. Lock onto it.
+                        activeRunId = latestRun.id;
+                        logMsg(`Blade is falling (Run ID: ${activeRunId})...`, "highlight");
+                    }
+                }
+
+                // If we are locked onto the active run, watch it bleed
+                if (latestRun.id === activeRunId) {
+                    if (latestRun.status === 'completed') {
+                        clearInterval(interval);
+                        
+                        if (latestRun.conclusion !== 'success') {
+                            updateProgress(0);
+                            logMsg(`The slaughter failed. Conclusion: ${latestRun.conclusion}`, "error");
+                            return;
+                        }
+
+                        updateProgress(95);
+                        logMsg("Retrieving severed remains...", "highlight");
+                        
+                        const artifactsRes = await fetch(latestRun.artifacts_url, { cache: 'no-store' });
+                        const artifactsData = await artifactsRes.json();
+                        
+                        if (artifactsData.artifacts && artifactsData.artifacts.length > 0) {
+                            updateProgress(100);
+                            const artifact = artifactsData.artifacts[0];
+                            logMsg(`<a href="${latestRun.html_url}" target="_blank">Click here to claim paper_planes_strata.zip from the Run artifacts</a>`, "success");
+                        } else {
+                            updateProgress(0);
+                            logMsg("No artifact found. The void consumed it.", "error");
+                        }
+                    } else {
+                        logMsg(`Executing vivisection... (Status: ${latestRun.status})`);
                     }
                 }
             }
