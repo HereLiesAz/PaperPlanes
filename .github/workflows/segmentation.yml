@@ -1,4 +1,4 @@
-name: Distributed Vivisection Pipeline
+name: PaperPlanes Segmentation Pipeline
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
           name: subject-mask
           path: workspace/subject_mask.png
 
-  generate_hallucination:
+  generate_image:
     needs: remove_background
     runs-on: ubuntu-latest
     steps:
@@ -34,10 +34,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: generated-image
-          path: workspace/generated_hallucination.png
+          path: workspace/generated_image.png
 
   align_images:
-    needs: generate_hallucination
+    needs: generate_image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -53,9 +53,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: aligned-image
-          path: workspace/aligned_generated.png
+          path: workspace/aligned_image.png
 
-  generate_depth:
+  extract_depth:
     needs: align_images
     runs-on: ubuntu-latest
     steps:
@@ -71,11 +71,11 @@ jobs:
       - run: python pipeline.py depth
       - uses: actions/upload-artifact@v4
         with:
-          name: depth-array
-          path: workspace/raw_depth.npy
+          name: depth-map
+          path: workspace/depth_map.npy
 
   segment_layers:
-    needs: generate_depth
+    needs: extract_depth
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -85,17 +85,17 @@ jobs:
           path: workspace/
       - uses: actions/download-artifact@v4
         with:
-          name: depth-array
+          name: depth-map
           path: workspace/
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
       - run: pip install opencv-python-headless numpy pillow
       - run: python pipeline.py segment
-      - name: Commit Extracted Strata
+      - name: Commit Output
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "The Butcher"
-          git add paper_planes_strata.zip
-          git commit -m "Strata extracted via distributed pipeline" || echo "No changes"
+          git config --local user.name "GitHub Action"
+          git add paper_planes_layers.zip
+          git commit -m "Add generated layers" || echo "No changes to commit"
           git push
