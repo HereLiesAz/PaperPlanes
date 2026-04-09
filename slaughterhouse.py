@@ -44,12 +44,11 @@ def run_slaughter():
     match = re.search(r'_layers-(\d+)\.', target_file)
     layers = int(match.group(1)) if match else 6
 
-    print(f"Preparing to sever {layers} strata based on logarithmic mass...", flush=True)
+    print(f"Preparing to sever {layers} strata based on perceptual gravity...", flush=True)
 
     original_img = Image.open(target_file).convert("RGB")
     W, H = original_img.size
     
-    # GitHub Actions will OOM instantly if we push past 800 on a CPU
     MAX_DIM = 800
     if max(H, W) > MAX_DIM:
         scale = MAX_DIM / float(max(H, W))
@@ -60,6 +59,9 @@ def run_slaughter():
     img_array = np.array(original_img)
     H, W = img_array.shape[:2]
     TOTAL_PIXELS = H * W
+    
+    img_lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+    L_channel, A_channel, B_channel = cv2.split(img_lab)
         
     print("Shattering the canvas into semantic shards...", flush=True)
     raw_segments = seg_pipe(original_img)
@@ -75,7 +77,8 @@ def run_slaughter():
         return
 
     processed_masks = []
-    areas = []
+    composite_weights = []
+    
     for mask_item in mask_list:
         mask_array = np.array(mask_item)
         if mask_array.shape != (H, W):
@@ -84,39 +87,51 @@ def run_slaughter():
             mask_array = mask_array > 0
         
         area = np.sum(mask_array)
-        # Ignore useless bounding boxes that cover the whole image, and microscopic noise
         if area > 10 and area < (TOTAL_PIXELS * 0.95):
+            masked_L = L_channel[mask_array]
+            masked_A = A_channel[mask_array]
+            masked_B = B_channel[mask_array]
+
+            std_L = np.std(masked_L) if len(masked_L) > 0 else 0
+            std_C = np.sqrt(np.std(masked_A)**2 + np.std(masked_B)**2) if len(masked_A) > 0 else 0
+
+            norm_std_L = std_L / 255.0
+            norm_std_C = std_C / 255.0
+
+            light_smoothness = max(0.0, 1.0 - norm_std_L)
+            color_smoothness = max(0.0, 1.0 - norm_std_C)
+
+            smoothness_factor = (2.0 * light_smoothness + 1.0 * color_smoothness) / 3.0
+
+            base_weight = np.log1p(area)
+            final_weight = base_weight * smoothness_factor
+
             processed_masks.append(mask_array)
-            areas.append(area)
+            composite_weights.append(final_weight)
 
-    # Sort masks strictly by Area (Largest to Smallest)
-    sort_idx = np.argsort(areas)[::-1]
-    processed_masks = [processed_masks[i] for i in sort_idx]
-    areas = np.array([areas[i] for i in sort_idx])
-
-    # Convert areas to a logarithmic scale
-    log_areas = np.log1p(areas)
-    min_log, max_log = log_areas.min(), log_areas.max()
+    composite_weights = np.array(composite_weights)
     
-    # Divide the logarithmic area scale into equal strata bins
-    bin_edges = np.linspace(min_log, max_log, layers)
+    sort_idx = np.argsort(composite_weights)[::-1]
+    processed_masks = [processed_masks[i] for i in sort_idx]
+    composite_weights = np.array([composite_weights[i] for i in sort_idx])
+
+    min_w, max_w = composite_weights.min(), composite_weights.max()
+    bin_edges = np.linspace(min_w, max_w, layers)
     
     layer_canvases = [np.zeros((H, W), dtype=bool) for _ in range(layers)]
     claimed_pixels = np.zeros((H, W), dtype=int) - 1 
 
+    print("Stacking the shards from background to foreground...", flush=True)
     for idx, mask_array in enumerate(processed_masks):
-        mask_log = log_areas[idx]
+        weight = composite_weights[idx]
         
-        # Find which mathematical bin this mask falls into
-        layer_idx = np.digitize(mask_log, bin_edges) - 1
+        layer_idx = np.digitize(weight, bin_edges) - 1
         layer_idx = np.clip(layer_idx, 0, layers - 1)
         
-        # Invert the index so the most massive areas fall to the back (Layer 0) 
         layer_idx = (layers - 1) - layer_idx
         
         claimed_pixels[mask_array] = layer_idx
 
-    # Send the completely unclaimed void to the background
     unclaimed_mask = claimed_pixels == -1
     claimed_pixels[unclaimed_mask] = 0
 
