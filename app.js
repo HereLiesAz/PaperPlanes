@@ -12,8 +12,7 @@ document.getElementById('processBtn').addEventListener('click', async () => {
     const file = fileInput.files[0];
     const extension = file.name.split('.').pop();
     
-    // Format the filename so the Python script knows how many layers to slice
-    // Example: original_layers-6.jpg
+    // Format the filename for the Python regex
     const newFilename = `original_layers-${layersCount}.${extension}`;
 
     statusEl.style.color = "#e0e0e0";
@@ -21,14 +20,14 @@ document.getElementById('processBtn').addEventListener('click', async () => {
 
     const reader = new FileReader();
     reader.onload = async function(event) {
-        // Strip the data URI scheme (e.g., "data:image/jpeg;base64,")
+        // Strip the base64 URI prefix
         const base64Content = event.target.result.split(',')[1];
 
         statusEl.textContent = "Transmitting to Cloudflare proxy...";
 
         try {
-            // IMPORTANT: Replace this with your actual Cloudflare proxy endpoint
-            const proxyUrl = "https://YOUR_CLOUDFLARE_PROXY_URL_HERE"; 
+            // Hardwired to your Cloudflare Worker domain
+            const proxyUrl = "https://paperplanes.hereliesaz.workers.dev"; 
 
             const response = await fetch(proxyUrl, {
                 method: 'POST',
@@ -44,7 +43,7 @@ document.getElementById('processBtn').addEventListener('click', async () => {
 
             if (response.ok) {
                 statusEl.style.color = "#00C851";
-                statusEl.textContent = "Success: Image uploaded to inbox. GitHub Action is starting.";
+                statusEl.textContent = "Success: Image uploaded to inbox. GitHub Action initiated.";
             } else {
                 const errData = await response.text();
                 statusEl.style.color = "#ff4444";
