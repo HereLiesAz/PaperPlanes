@@ -20,9 +20,7 @@ function logMsg(msg, type = 'entry') {
     logContainer.scrollTop = logContainer.scrollHeight;
 }
 
-function updateProgress(percent) {
-    progressBar.value = percent;
-}
+function updateProgress(percent) { progressBar.value = percent; }
 
 executeBtn.addEventListener('click', async () => {
     const token = tokenInput.value.trim();
@@ -43,7 +41,6 @@ executeBtn.addEventListener('click', async () => {
     reader.onload = async (e) => {
         const base64Content = e.target.result.split(',')[1];
         const filename = `inbox/victim_${Date.now()}_layers-${layers}.${file.name.split('.').pop()}`;
-        
         const pushTime = Date.now(); 
         
         try {
@@ -52,14 +49,8 @@ executeBtn.addEventListener('click', async () => {
             
             const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/${filename}`, {
                 method: 'PUT',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    message: `Pushing victim for vivisection`,
-                    content: base64Content
-                })
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: `Pushing victim for vivisection`, content: base64Content })
             });
 
             if (!putRes.ok) throw new Error(`Commit failed: ${putRes.statusText}`);
@@ -69,7 +60,6 @@ executeBtn.addEventListener('click', async () => {
             
             await new Promise(r => setTimeout(r, 5000));
             pollForArtifact(repo, token, pushTime);
-
         } catch (err) {
             updateProgress(0);
             logMsg(`Catastrophe: ${err.message}`, "error");
@@ -85,8 +75,7 @@ async function pollForArtifact(repo, token, pushTime) {
 
     const interval = setInterval(async () => {
         attempts++;
-        const percent = 30 + ((attempts / maxAttempts) * 60);
-        updateProgress(percent);
+        updateProgress(30 + ((attempts / maxAttempts) * 60));
 
         if (attempts > maxAttempts) {
             clearInterval(interval);
@@ -96,7 +85,6 @@ async function pollForArtifact(repo, token, pushTime) {
         }
 
         try {
-            // Explicitly scope the query to ONLY the slaughterhouse workflow, breaking the cache
             const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/slaughterhouse.yml/runs?per_page=1`, {
                 headers: { 'Authorization': `Bearer ${token}` },
                 cache: 'no-store'
@@ -108,7 +96,6 @@ async function pollForArtifact(repo, token, pushTime) {
                 const runStartTime = new Date(latestRun.created_at).getTime();
                 
                 if (!activeRunId) {
-                    // Ignore old ghosts
                     if (runStartTime < pushTime - 5000) {
                         logMsg(`Waiting for GitHub to wake up... (Attempt ${attempts}/${maxAttempts})`);
                         return; 
@@ -121,19 +108,16 @@ async function pollForArtifact(repo, token, pushTime) {
                 if (latestRun.id === activeRunId) {
                     if (latestRun.status === 'completed') {
                         clearInterval(interval);
-                        
                         if (latestRun.conclusion !== 'success') {
                             updateProgress(0);
                             logMsg(`The slaughter failed. Conclusion: ${latestRun.conclusion}`, "error");
                             return;
                         }
-
                         updateProgress(95);
                         logMsg("Retrieving severed remains...", "highlight");
                         
                         const artifactsRes = await fetch(latestRun.artifacts_url, { 
-                            headers: { 'Authorization': `Bearer ${token}` },
-                            cache: 'no-store' 
+                            headers: { 'Authorization': `Bearer ${token}` }, cache: 'no-store' 
                         });
                         const artifactsData = await artifactsRes.json();
                         
