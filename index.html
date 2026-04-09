@@ -6,53 +6,163 @@
     <title>Paper Planes</title>
     <link rel="manifest" href="manifest.json">
     <style>
+        :root {
+            --bg: #050505;
+            --fg: #f0f0f0;
+            --accent: #333;
+            --border: #444;
+            --danger: #ff3333;
+        }
+        * { box-sizing: border-box; }
         body { 
             margin: 0; 
             overflow: hidden; 
-            background: #000; 
-            color: #fff; 
-            font-family: monospace; 
+            background: var(--bg); 
+            color: var(--fg); 
+            font-family: "Courier New", Courier, monospace; 
             display: flex; 
-            flex-direction: column; 
             height: 100vh; 
+            letter-spacing: -0.5px;
         }
         #controls { 
-            padding: 15px; 
+            width: 320px;
+            padding: 30px 20px; 
             z-index: 10; 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            background: rgba(0,0,0,0.85); 
-            border-bottom-right-radius: 8px;
+            background: rgba(5, 5, 5, 0.9); 
+            border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            width: 300px;
+            gap: 20px;
+            box-shadow: 5px 0 15px rgba(0,0,0,0.8);
+            backdrop-filter: blur(5px);
         }
-        input, button {
-            background: #222; 
-            color: #fff; 
-            border: 1px solid #555;
-            padding: 5px;
-            font-family: monospace;
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 1.2rem;
+            text-transform: uppercase;
+            font-weight: normal;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
         }
-        button { cursor: pointer; background: #333; }
-        button:hover { background: #555; }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-size: 0.8rem;
+            color: #888;
+            text-transform: uppercase;
+        }
+        input {
+            background: transparent; 
+            color: var(--fg); 
+            border: 1px solid var(--border);
+            padding: 10px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input:focus {
+            border-color: var(--fg);
+        }
+        input[type="file"] {
+            padding: 10px 0;
+            border: none;
+        }
+        input[type="file"]::file-selector-button {
+            background: transparent;
+            color: var(--fg);
+            border: 1px solid var(--border);
+            padding: 8px 15px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.2s, color 0.2s;
+        }
+        input[type="file"]::file-selector-button:hover {
+            background: var(--fg);
+            color: var(--bg);
+        }
+        button { 
+            background: transparent; 
+            color: var(--fg); 
+            border: 1px solid var(--fg);
+            padding: 15px;
+            font-family: inherit;
+            text-transform: uppercase;
+            cursor: pointer; 
+            transition: all 0.2s;
+            margin-top: 10px;
+        }
+        button:hover { 
+            background: var(--fg); 
+            color: var(--bg); 
+        }
         #status { 
-            color: #ff3333; 
-            font-weight: bold;
+            margin-top: auto;
+            color: var(--danger); 
+            font-size: 0.85rem;
             word-wrap: break-word;
+            min-height: 40px;
+        }
+        #status a {
+            color: #fff;
+            text-decoration: none;
+            border-bottom: 1px dotted #fff;
+        }
+        #status a:hover {
+            background: #fff;
+            color: #000;
+        }
+        /* The Void */
+        #stage-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            perspective: 1200px;
+            background: radial-gradient(circle at center, #111 0%, #000 100%);
+        }
+        #stage { 
+            position: relative; 
+            transform-style: preserve-3d; 
+            width: 80vw; 
+            height: 80vh; 
+            transition: transform 0.1s linear; 
         }
     </style>
 </head>
 <body>
     <div id="controls">
-        <label>GitHub PAT (repo scope):<br><input type="password" id="ghToken" style="width:100%;"></label>
-        <label>Repo (Owner/Name):<br><input type="text" id="ghRepo" placeholder="HereLiesAz/paper-planes" style="width:100%;"></label>
-        <label>Strata: <input type="number" id="numLayers" value="6" min="2" max="256" style="width:50px; background:#222; color:#fff; border:1px solid #555;"></label>
-        <input type="file" id="upload" accept="image/*">
-        <button id="executeBtn">Send to the Slaughterhouse</button>
-        <div id="status">Awaiting victim...</div>
+        <h1>Paper Planes</h1>
+        
+        <div class="input-group">
+            <label>GitHub PAT</label>
+            <input type="password" id="ghToken" placeholder="ghp_xxxxxxxx">
+        </div>
+        
+        <div class="input-group">
+            <label>Repository</label>
+            <input type="text" id="ghRepo" placeholder="HereLiesAz/paper-planes">
+        </div>
+        
+        <div class="input-group">
+            <label>Strata (2-256)</label>
+            <input type="number" id="numLayers" value="6" min="2" max="256">
+        </div>
+        
+        <div class="input-group">
+            <label>Victim</label>
+            <input type="file" id="upload" accept="image/*">
+        </div>
+        
+        <button id="executeBtn">Initiate Vivisection</button>
+        
+        <div id="status">Awaiting input...</div>
+    </div>
+
+    <div id="stage-container">
+        <div id="stage"></div>
     </div>
 
     <script type="module" src="app.js"></script>
