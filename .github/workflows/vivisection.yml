@@ -1,4 +1,4 @@
-name: The Chimera Pipeline
+name: Distributed Vivisection Pipeline
 
 on:
   push:
@@ -7,30 +7,76 @@ on:
   workflow_dispatch:
 
 jobs:
-  slaughter:
+  remove_background:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the Labyrinth
-        uses: actions/checkout@v3
-
-      - name: Awaken the Python Environment
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+      - run: pip install pillow numpy rembg[cli]
+      - run: python pipeline.py remove_bg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: subject-mask
+          path: workspace/subject_mask.png
 
-      - name: Install the Instruments
-        run: |
-          python -m pip install --upgrade pip
-          # rembg for background removal, opencv for alignment, transformers for hallucination
-          pip install opencv-python-headless Pillow numpy torch transformers rembg[cli] onnxruntime
+  align_images:
+    needs: remove_background
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - run: pip install opencv-python-headless numpy pillow
+      - run: python pipeline.py align
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aligned-image
+          path: workspace/aligned_generated.png
 
-      - name: Execute the Chimera Vivisection
-        run: python slaughterhouse.py
+  generate_depth:
+    needs: align_images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v4
+        with:
+          name: aligned-image
+          path: workspace/
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - run: pip install torch transformers pillow numpy
+      - run: python pipeline.py depth
+      - uses: actions/upload-artifact@v4
+        with:
+          name: depth-array
+          path: workspace/raw_depth.npy
 
-      - name: Commit the Remains
+  segment_layers:
+    needs: generate_depth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v4
+        with:
+          name: subject-mask
+          path: workspace/
+      - uses: actions/download-artifact@v4
+        with:
+          name: depth-array
+          path: workspace/
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - run: pip install opencv-python-headless numpy pillow
+      - run: python pipeline.py segment
+      - name: Commit Extracted Strata
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "The Butcher"
           git add paper_planes_strata.zip
-          git commit -m "Artifacts extracted via Chimera Pipeline" || echo "No changes to commit"
+          git commit -m "Strata extracted via distributed pipeline" || echo "No changes"
           git push
