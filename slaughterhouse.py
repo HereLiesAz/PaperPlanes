@@ -5,6 +5,7 @@ import cv2
 import torch
 import numpy as np
 import glob
+import re
 from PIL import Image
 from transformers import pipeline
 
@@ -28,7 +29,10 @@ def run_slaughter():
         return
 
     target_file = inbox_files[0]
-    layers = int(os.environ.get("LAYERS", 6))
+    
+    # Read the strata count from the victim's toe tag
+    match = re.search(r'_layers-(\d+)\.', target_file)
+    layers = int(match.group(1)) if match else 6
 
     original_img = Image.open(target_file).convert("RGB")
     img_array = np.array(original_img)
@@ -47,15 +51,25 @@ def run_slaughter():
             interpolation=cv2.INTER_LANCZOS4
         )
         
-    segments = seg_pipe(original_img)
-    segments.sort(key=lambda x: np.sum(np.array(x["mask"])), reverse=True)
+    raw_segments = seg_pipe(original_img)
+    
+    # Extract the masks regardless of how the pipeline structures the dictionary
+    if isinstance(raw_segments, dict) and "masks" in raw_segments:
+        mask_list = list(raw_segments["masks"])
+    elif isinstance(raw_segments, list):
+        mask_list = [s["mask"] if isinstance(s, dict) and "mask" in s else s for s in raw_segments]
+    else:
+        mask_list = []
+
+    # Sort masks by area (largest to smallest)
+    mask_list.sort(key=lambda m: np.sum(np.array(m) > 0), reverse=True)
 
     bin_edges = np.linspace(0, 256, layers + 1)
     layer_canvases = [np.zeros((H, W), dtype=bool) for _ in range(layers)]
     claimed_pixels = np.zeros((H, W), dtype=int) - 1 
     
-    for segment in segments:
-        mask_array = np.array(segment["mask"])
+    for mask_item in mask_list:
+        mask_array = np.array(mask_item)
         if mask_array.shape != (H, W):
             mask_array = cv2.resize(
                 mask_array.astype(np.uint8), 
@@ -84,7 +98,6 @@ def run_slaughter():
 
     foreground_mask = (claimed_pixels > 0).astype(np.uint8) * 255
     
-    # Aggressively dilate the wound so Telea cannot sample the corpse's edges
     kernel = np.ones((25, 25), np.uint8)
     dilated_mask = cv2.dilate(foreground_mask, kernel, iterations=1)
     
