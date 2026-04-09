@@ -1,0 +1,36 @@
+name: The Chimera Pipeline
+
+on:
+  push:
+    paths:
+      - 'inbox/**'
+  workflow_dispatch:
+
+jobs:
+  slaughter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Labyrinth
+        uses: actions/checkout@v3
+
+      - name: Awaken the Python Environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install the Instruments
+        run: |
+          python -m pip install --upgrade pip
+          # rembg for background removal, opencv for alignment, transformers for hallucination
+          pip install opencv-python-headless Pillow numpy torch transformers rembg[cli] onnxruntime
+
+      - name: Execute the Chimera Vivisection
+        run: python slaughterhouse.py
+
+      - name: Commit the Remains
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "The Butcher"
+          git add paper_planes_strata.zip
+          git commit -m "Artifacts extracted via Chimera Pipeline" || echo "No changes to commit"
+          git push
