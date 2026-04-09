@@ -1,12 +1,28 @@
+/**
+ * @file app.js
+ * @description Orchestrates the digital slaughter and subsequent 3D resurrection of the user's artwork.
+ * We farm out the dirty work to the cloud, then build a mausoleum for the remains.
+ */
+
 const numLayersInput = document.getElementById('numLayers');
 const uploadInput = document.getElementById('upload');
 const executeBtn = document.getElementById('executeBtn');
+const loadStrataInput = document.getElementById('loadStrata');
 const logContainer = document.getElementById('log-container');
 const progressBar = document.getElementById('progressBar');
+const stage = document.getElementById('stage');
 
 const CLOUDFLARE_WORKER_URL = 'https://paperplanes.hereliesaz.workers.dev/'; 
 const GH_REPO = 'HereLiesAz/PaperPlanes';
 
+let cameraZ = 0;
+const Z_STEP_DISTANCE = -800; // The arbitrary gap between slices of reality
+
+/**
+ * Appends a sterile decree to the scroll of history.
+ * @param {string} msg - The text to log.
+ * @param {string} [type='entry'] - The CSS class suffix denoting the emotional weight of the log.
+ */
 function logMsg(msg, type = 'entry') {
     const el = document.createElement('div');
     el.className = `log-${type}`;
@@ -15,6 +31,10 @@ function logMsg(msg, type = 'entry') {
     logContainer.scrollTop = logContainer.scrollHeight;
 }
 
+/**
+ * Feeds the progress bar its meaningless percentage.
+ * @param {number} percent - 0 to 100.
+ */
 function updateProgress(percent) { progressBar.value = percent; }
 
 executeBtn.addEventListener('click', async () => {
@@ -61,6 +81,11 @@ executeBtn.addEventListener('click', async () => {
     reader.readAsDataURL(file);
 });
 
+/**
+ * Stares endlessly into the GitHub Actions abyss until it spits out a corpse.
+ * @param {string} repo - The owner/repo string.
+ * @param {number} pushTime - Epoch ms of when we threw the file over the wall.
+ */
 async function pollForArtifact(repo, pushTime) {
     const maxAttempts = 60; 
     let attempts = 0;
@@ -78,7 +103,6 @@ async function pollForArtifact(repo, pushTime) {
         }
 
         try {
-            // Polling the public Actions API. No token required if the repo is public.
             const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/slaughterhouse.yml/runs?per_page=1`, {
                 cache: 'no-store'
             });
@@ -129,4 +153,53 @@ async function pollForArtifact(repo, pushTime) {
             logMsg(`Polling error: ${err.message}`, "error");
         }
     }, 5000);
+}
+
+/**
+ * Resurrects the severed PNG layers into the 3D theater, stacking them along the Z-axis.
+ */
+loadStrataInput.addEventListener('change', (e) => {
+    // Sort files alphabetically to ensure layer_000, layer_001 order is respected.
+    const files = Array.from(e.target.files).sort((a, b) => a.name.localeCompare(b.name));
+    if (files.length === 0) return;
+
+    stage.innerHTML = '';
+    logMsg(`Resurrecting ${files.length} strata into the void...`, "highlight");
+
+    files.forEach((file, index) => {
+        const url = URL.createObjectURL(file);
+        const img = document.createElement('img');
+        img.src = url;
+        img.className = 'stratum';
+        
+        // layer_000 (furthest back) gets pushed the deepest. 
+        // We reverse the math so the last file in the array is at Z=0 (foreground).
+        const depth = (files.length - 1 - index) * Z_STEP_DISTANCE;
+        img.style.transform = `translateZ(${depth}px)`;
+        
+        stage.appendChild(img);
+    });
+
+    cameraZ = 0;
+    updateCamera();
+});
+
+/**
+ * Translates the relentless, agonizing churn of the mouse wheel into forward momentum through the hallucinated space.
+ */
+window.addEventListener('wheel', (e) => {
+    // DeltaY dictates speed. Tweak the multiplier if the universe is rushing past too quickly.
+    cameraZ += e.deltaY * 3; 
+    
+    // Prevent retreating out of the theater entirely. The only way out is through.
+    if (cameraZ < 0) cameraZ = 0;
+    
+    updateCamera();
+}, { passive: true });
+
+/**
+ * Applies the calculated Z-translation to the theater stage, pushing the strata towards the viewport.
+ */
+function updateCamera() {
+    stage.style.transform = `translateZ(${cameraZ}px)`;
 }
