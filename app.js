@@ -1,11 +1,16 @@
-const uploadInput = document.getElementById('upload');
+const tokenInput = document.getElementById('ghToken');
+const repoInput = document.getElementById('ghRepo');
 const numLayersInput = document.getElementById('numLayers');
+const uploadInput = document.getElementById('upload');
 const executeBtn = document.getElementById('executeBtn');
 const logContainer = document.getElementById('log-container');
 const progressBar = document.getElementById('progressBar');
 
-const CLOUDFLARE_WORKER_URL = 'https://paperplanes.hereliesaz.workers.dev/'; 
-const GH_REPO = 'HereLiesAz/PaperPlanes';
+tokenInput.value = localStorage.getItem('ghToken') || '';
+repoInput.value = localStorage.getItem('ghRepo') || '';
+
+tokenInput.addEventListener('change', () => localStorage.setItem('ghToken', tokenInput.value.trim()));
+repoInput.addEventListener('change', () => localStorage.setItem('ghRepo', repoInput.value.trim()));
 
 function logMsg(msg, type = 'entry') {
     const el = document.createElement('div');
@@ -20,11 +25,13 @@ function updateProgress(percent) {
 }
 
 executeBtn.addEventListener('click', async () => {
+    const token = tokenInput.value.trim();
+    const repo = repoInput.value.trim();
     const file = uploadInput.files[0];
     const layers = parseInt(numLayersInput.value) || 6;
 
-    if (!file) {
-        logMsg("Error: Missing victim.", "error");
+    if (!token || !repo || !file) {
+        logMsg("Error: Missing token, repository, or victim.", "error");
         return;
     }
 
@@ -35,28 +42,33 @@ executeBtn.addEventListener('click', async () => {
     const reader = new FileReader();
     reader.onload = async (e) => {
         const base64Content = e.target.result.split(',')[1];
-        const filename = `victim_${Date.now()}_layers-${layers}.${file.name.split('.').pop()}`;
+        const filename = `inbox/victim_${Date.now()}_layers-${layers}.${file.name.split('.').pop()}`;
         
-        // Record the exact moment we hand over the victim so we don't track old ghosts
         const pushTime = Date.now(); 
         
         try {
             updateProgress(15);
-            logMsg("Handing victim to the proxy...");
+            logMsg("Committing victim directly to the slaughterhouse...");
             
-            const proxyRes = await fetch(CLOUDFLARE_WORKER_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename, base64Content })
+            const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/${filename}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: `Pushing victim for vivisection`,
+                    content: base64Content
+                })
             });
 
-            if (!proxyRes.ok) throw new Error(await proxyRes.text());
+            if (!putRes.ok) throw new Error(`Commit failed: ${putRes.statusText}`);
 
             updateProgress(30);
-            logMsg("Victim committed. Tracking the slaughterhouse execution...", "success");
+            logMsg("Victim committed. Tracking the execution...", "success");
             
             await new Promise(r => setTimeout(r, 5000));
-            pollForArtifact(GH_REPO, pushTime);
+            pollForArtifact(repo, token, pushTime);
 
         } catch (err) {
             updateProgress(0);
@@ -66,7 +78,7 @@ executeBtn.addEventListener('click', async () => {
     reader.readAsDataURL(file);
 });
 
-async function pollForArtifact(repo, pushTime) {
+async function pollForArtifact(repo, token, pushTime) {
     const maxAttempts = 60; 
     let attempts = 0;
     let activeRunId = null;
@@ -84,8 +96,9 @@ async function pollForArtifact(repo, pushTime) {
         }
 
         try {
-            // Explicitly scope the query to ONLY the slaughterhouse workflow
+            // Explicitly scope the query to ONLY the slaughterhouse workflow, breaking the cache
             const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/slaughterhouse.yml/runs?per_page=1`, {
+                headers: { 'Authorization': `Bearer ${token}` },
                 cache: 'no-store'
             });
             const runsData = await runsRes.json();
@@ -95,7 +108,7 @@ async function pollForArtifact(repo, pushTime) {
                 const runStartTime = new Date(latestRun.created_at).getTime();
                 
                 if (!activeRunId) {
-                    // Ignore any run that started before we clicked the button
+                    // Ignore old ghosts
                     if (runStartTime < pushTime - 5000) {
                         logMsg(`Waiting for GitHub to wake up... (Attempt ${attempts}/${maxAttempts})`);
                         return; 
@@ -118,13 +131,16 @@ async function pollForArtifact(repo, pushTime) {
                         updateProgress(95);
                         logMsg("Retrieving severed remains...", "highlight");
                         
-                        const artifactsRes = await fetch(latestRun.artifacts_url, { cache: 'no-store' });
+                        const artifactsRes = await fetch(latestRun.artifacts_url, { 
+                            headers: { 'Authorization': `Bearer ${token}` },
+                            cache: 'no-store' 
+                        });
                         const artifactsData = await artifactsRes.json();
                         
                         if (artifactsData.artifacts && artifactsData.artifacts.length > 0) {
                             updateProgress(100);
                             const artifact = artifactsData.artifacts[0];
-                            logMsg(`<a href="${latestRun.html_url}" target="_blank">Click here to claim paper_planes_strata.zip from the Run artifacts</a>`, "success");
+                            logMsg(`<a href="https://github.com/${repo}/actions/runs/${latestRun.id}/artifacts/${artifact.id}" target="_blank">Click here to claim paper_planes_strata.zip</a>`, "success");
                         } else {
                             updateProgress(0);
                             logMsg("No artifact found. The void consumed it.", "error");
