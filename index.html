@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Diorama Slicer PWA</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #000; 
+            color: #fff; 
+            font-family: monospace; 
+            display: flex; 
+            flex-direction: column; 
+            height: 100vh; 
+            perspective: 1200px; 
+        }
+        #controls { 
+            padding: 15px; 
+            z-index: 10; 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            background: rgba(0,0,0,0.85); 
+            border-bottom-right-radius: 8px;
+        }
+        #stage-container { 
+            flex: 1; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            overflow: hidden; 
+        }
+        #stage { 
+            position: relative; 
+            transform-style: preserve-3d; 
+            width: 80vw; 
+            height: 80vh; 
+            transition: transform 0.1s linear; 
+        }
+        .layer { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            object-fit: contain; 
+            pointer-events: none; 
+            /* Feathering the jagged edges of reality */
+            filter: drop-shadow(0px 0px 2px rgba(0,0,0,0.5));
+        }
+        #loading { 
+            display: none; 
+            margin-top: 10px; 
+            color: #ff3333; 
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input type="file" id="upload" accept="image/*"><br><br>
+        <label>Strata: <input type="number" id="numLayers" value="6" min="2" max="15" style="width:45px; background:#222; color:#fff; border:1px solid #555;"></label>
+        <div id="loading">Summoning neural weights...</div>
+    </div>
+    <div id="stage-container">
+        <div id="stage"></div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+</body>
+</html>
