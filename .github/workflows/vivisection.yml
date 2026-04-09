@@ -21,11 +21,30 @@ jobs:
           name: subject-mask
           path: workspace/subject_mask.png
 
-  align_images:
+  generate_hallucination:
     needs: remove_background
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - run: pip install torch diffusers transformers accelerate pillow numpy
+      - run: python pipeline.py generate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-image
+          path: workspace/generated_hallucination.png
+
+  align_images:
+    needs: generate_hallucination
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v4
+        with:
+          name: generated-image
+          path: workspace/
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
