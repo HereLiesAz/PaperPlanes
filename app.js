@@ -1,131 +1,114 @@
-import { pipeline, env, RawImage } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.16.0';
+const tokenInput = document.getElementById('ghToken');
+const repoInput = document.getElementById('ghRepo');
+const uploadInput = document.getElementById('upload');
+const executeBtn = document.getElementById('executeBtn');
+const statusDiv = document.getElementById('status');
 
-// Force WebAssembly execution for static GitHub Pages hosting
-env.allowLocalModels = false;
+// Remember the keys to the kingdom
+tokenInput.value = localStorage.getItem('ghToken') || '';
+repoInput.value = localStorage.getItem('ghRepo') || '';
 
-const upload = document.getElementById('upload');
-const stage = document.getElementById('stage');
-const loading = document.getElementById('loading');
-const numLayersInput = document.getElementById('numLayers');
+tokenInput.addEventListener('change', () => localStorage.setItem('ghToken', tokenInput.value));
+repoInput.addEventListener('change', () => localStorage.setItem('ghRepo', repoInput.value));
 
-let depthEstimator = null;
+executeBtn.addEventListener('click', async () => {
+    const token = tokenInput.value.trim();
+    const repo = repoInput.value.trim();
+    const file = uploadInput.files[0];
 
-async function initModel() {
-    if (!depthEstimator) {
-        loading.style.display = 'block';
-        loading.innerText = 'Loading Depth-Anything model (WASM)...';
-        depthEstimator = await pipeline('depth-estimation', 'Xenova/depth-anything-small-hf');
-        loading.style.display = 'none';
+    if (!token || !repo || !file) {
+        statusDiv.innerText = "Error: Missing token, repo, or file.";
+        return;
     }
-}
 
-upload.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    await initModel();
-    loading.style.display = 'block';
-    loading.innerText = 'Hallucinating the Z-axis...';
-    stage.innerHTML = '';
-
+    statusDiv.innerText = "Encoding victim...";
+    
     const reader = new FileReader();
-    reader.onload = async (event) => {
-        const img = new Image();
-        img.onload = async () => {
-            await processImage(img);
-        };
-        img.src = event.target.result;
+    reader.onload = async (e) => {
+        // Strip the data:image/png;base64, header
+        const base64Content = e.target.result.split(',')[1];
+        const filename = `inbox/victim_${Date.now()}.${file.name.split('.').pop()}`;
+        
+        try {
+            statusDiv.innerText = "Committing victim to inbox...";
+            const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/${filename}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: `Pushing victim to slaughterhouse`,
+                    content: base64Content
+                })
+            });
+
+            if (!putRes.ok) throw new Error(`Commit failed: ${putRes.statusText}`);
+
+            statusDiv.innerText = "Victim committed. Polling Actions API for execution...";
+            
+            // Wait a moment for the webhook to trigger the action
+            await new Promise(r => setTimeout(r, 5000));
+            
+            pollForArtifact(repo, token);
+
+        } catch (err) {
+            statusDiv.innerText = `Catastrophe: ${err.message}`;
+        }
     };
     reader.readAsDataURL(file);
 });
 
-async function processImage(img) {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(img, 0, 0);
-    
-    // Pass image to Transformers.js
-    const rawImage = await RawImage.fromURL(img.src);
-    const { depth } = await depthEstimator(rawImage);
-    
-    const depthData = depth.data;
-    let minDepth = 255, maxDepth = 0;
-    for (let i = 0; i < depthData.length; i++) {
-        if (depthData[i] < minDepth) minDepth = depthData[i];
-        if (depthData[i] > maxDepth) maxDepth = depthData[i];
-    }
+async function pollForArtifact(repo, token) {
+    const maxAttempts = 60; // 5 minutes max
+    let attempts = 0;
 
-    const numLayers = parseInt(numLayersInput.value);
-    const originalData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    const depthWidth = depth.width;
-    const depthHeight = depth.height;
+    const interval = setInterval(async () => {
+        attempts++;
+        if (attempts > maxAttempts) {
+            clearInterval(interval);
+            statusDiv.innerText = "Timeout: The machines took too long.";
+            return;
+        }
 
-    // Slice the spectrum
-    for (let layer = 0; layer < numLayers; layer++) {
-        const lowerBound = minDepth + (layer / numLayers) * (maxDepth - minDepth);
-        const upperBound = minDepth + ((layer + 1) / numLayers) * (maxDepth - minDepth);
-        
-        const layerCanvas = document.createElement('canvas');
-        layerCanvas.width = canvas.width;
-        layerCanvas.height = canvas.height;
-        const layerCtx = layerCanvas.getContext('2d');
-        const layerImgData = layerCtx.createImageData(canvas.width, canvas.height);
-        
-        for (let y = 0; y < canvas.height; y++) {
-            for (let x = 0; x < canvas.width; x++) {
-                // Map high-res image coordinates to low-res depth map coordinates
-                const dx = Math.floor((x / canvas.width) * depthWidth);
-                const dy = Math.floor((y / canvas.height) * depthHeight);
-                const dIndex = dy * depthWidth + dx;
+        try {
+            statusDiv.innerText = `Listening for the blade... (Attempt ${attempts}/60)`;
+            
+            // Fetch latest workflow runs
+            const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/runs?event=push&per_page=1`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const runsData = await runsRes.json();
+            
+            if (runsData.workflow_runs && runsData.workflow_runs.length > 0) {
+                const latestRun = runsData.workflow_runs[0];
                 
-                // depth-anything: 255 is closest, 0 is furthest
-                const dValue = depthData[dIndex];
-                
-                if (dValue >= lowerBound && (dValue < upperBound || layer === numLayers - 1)) {
-                    const i = (y * canvas.width + x) * 4;
-                    layerImgData.data[i] = originalData[i];
-                    layerImgData.data[i+1] = originalData[i+1];
-                    layerImgData.data[i+2] = originalData[i+2];
-                    layerImgData.data[i+3] = 255;
+                if (latestRun.status === 'completed') {
+                    clearInterval(interval);
+                    
+                    if (latestRun.conclusion !== 'success') {
+                        statusDiv.innerText = `The slaughter failed. Conclusion: ${latestRun.conclusion}`;
+                        return;
+                    }
+
+                    statusDiv.innerText = "Retrieving severed remains...";
+                    
+                    const artifactsRes = await fetch(latestRun.artifacts_url, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const artifactsData = await artifactsRes.json();
+                    
+                    if (artifactsData.artifacts && artifactsData.artifacts.length > 0) {
+                        const artifact = artifactsData.artifacts[0];
+                        // Artifact download requires following a redirect with the auth token
+                        statusDiv.innerHTML = `<a href="https://github.com/${repo}/actions/runs/${latestRun.id}/artifacts/${artifact.id}" target="_blank" style="color:#0f0;">Click here to claim paper_planes_strata.zip</a>`;
+                    } else {
+                        statusDiv.innerText = "No artifact found. The void consumed it.";
+                    }
                 }
             }
+        } catch (err) {
+            console.error(err);
         }
-        layerCtx.putImageData(layerImgData, 0, 0);
-        
-        const layerImg = document.createElement('img');
-        layerImg.src = layerCanvas.toDataURL();
-        layerImg.className = 'layer';
-        
-        // Push background layers away, scale them up to preserve original framing when centered
-        const zTranslate = (numLayers - 1 - layer) * -150; 
-        const scaleFactor = 1 + Math.abs(zTranslate) / 1200;
-        layerImg.style.transform = `translateZ(${zTranslate}px) scale(${scaleFactor})`;
-        
-        stage.appendChild(layerImg);
-    }
-    loading.style.display = 'none';
+    }, 5000);
 }
-
-// Puppet mastering
-let rotX = 0, rotY = 0;
-
-function updateStageTransform(xRatio, yRatio) {
-    rotY = xRatio * 35; 
-    rotX = -yRatio * 35;
-    stage.style.transform = `rotateX(${rotX}deg) rotateY(${rotY}deg)`;
-}
-
-document.addEventListener('mousemove', (e) => {
-    const x = (e.clientX / window.innerWidth - 0.5) * 2;
-    const y = (e.clientY / window.innerHeight - 0.5) * 2;
-    updateStageTransform(x, y);
-});
-
-document.addEventListener('touchmove', (e) => {
-    const touch = e.touches[0];
-    const x = (touch.clientX / window.innerWidth - 0.5) * 2;
-    const y = (touch.clientY / window.innerHeight - 0.5) * 2;
-    updateStageTransform(x, y);
-}, { passive: true });
