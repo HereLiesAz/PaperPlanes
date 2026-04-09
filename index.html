@@ -25,7 +25,7 @@
             letter-spacing: -0.5px;
         }
         #controls { 
-            width: 320px;
+            width: 340px;
             padding: 30px 20px; 
             z-index: 10; 
             background: rgba(5, 5, 5, 0.9); 
@@ -98,23 +98,38 @@
             background: var(--fg); 
             color: var(--bg); 
         }
-        #status { 
-            margin-top: auto;
-            color: var(--danger); 
-            font-size: 0.85rem;
-            word-wrap: break-word;
-            min-height: 40px;
+        
+        progress { 
+            width: 100%; 
+            appearance: none; 
+            height: 4px; 
+            border: none;
+            background: #222;
         }
-        #status a {
-            color: #fff;
-            text-decoration: none;
-            border-bottom: 1px dotted #fff;
+        progress::-webkit-progress-bar { background: #222; }
+        progress::-webkit-progress-value { background: var(--fg); transition: width 0.3s linear; }
+        progress::-moz-progress-bar { background: var(--fg); }
+
+        #log-container {
+            flex: 1;
+            overflow-y: auto;
+            background: #0a0a0a;
+            border: 1px solid var(--border);
+            padding: 10px;
+            font-size: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-height: 150px;
+            max-height: 300px;
         }
-        #status a:hover {
-            background: #fff;
-            color: #000;
-        }
-        /* The Void */
+        .log-entry { color: #888; }
+        .log-success { color: #0f0; }
+        .log-error { color: var(--danger); }
+        .log-highlight { color: var(--fg); }
+        .log-entry a, .log-success a { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+        .log-entry a:hover, .log-success a:hover { background: currentColor; color: #000; }
+
         #stage-container {
             flex: 1;
             display: flex;
@@ -137,28 +152,16 @@
         <h1>Paper Planes</h1>
         
         <div class="input-group">
-            <label>GitHub PAT</label>
-            <input type="password" id="ghToken" placeholder="ghp_xxxxxxxx">
-        </div>
-        
-        <div class="input-group">
-            <label>Repository</label>
-            <input type="text" id="ghRepo" placeholder="HereLiesAz/paper-planes">
-        </div>
-        
-        <div class="input-group">
-            <label>Strata (2-256)</label>
-            <input type="number" id="numLayers" value="6" min="2" max="256">
-        </div>
-        
-        <div class="input-group">
             <label>Victim</label>
             <input type="file" id="upload" accept="image/*">
         </div>
         
         <button id="executeBtn">Initiate Vivisection</button>
         
-        <div id="status">Awaiting input...</div>
+        <progress id="progressBar" value="0" max="100"></progress>
+        <div id="log-container">
+            <div class="log-entry">> Awaiting input...</div>
+        </div>
     </div>
 
     <div id="stage-container">
