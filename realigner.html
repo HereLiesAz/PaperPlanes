@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Depth Map Realigner</title>
+<style>
+  body { background: #121212; color: #eee; font-family: monospace; display: flex; gap: 20px; padding: 20px; }
+  .controls { width: 320px; display: flex; flex-direction: column; gap: 15px; background: #1e1e1e; padding: 20px; border-radius: 8px; }
+  .preview { flex-grow: 1; display: flex; justify-content: center; align-items: flex-start; }
+  canvas { max-width: 100%; height: auto; border: 1px solid #444; background: #000; }
+  label { display: flex; flex-direction: column; font-size: 14px; }
+  input[type=range] { margin-top: 5px; width: 100%; }
+  button { padding: 12px; background: #eee; color: #121212; border: none; cursor: pointer; font-weight: bold; margin-top: 10px; }
+  button:hover { background: #ccc; }
+  input[type=file] { margin-top: 5px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="controls">
+    <h2>REALIGNER</h2>
+    <label>Original Image <input type="file" id="baseUpload" accept="image/*"></label>
+    <label>Depth Map <input type="file" id="depthUpload" accept="image/*"></label>
+    
+    <label>Translate X: <span id="xVal">0</span>px 
+      <input type="range" id="x" min="-2000" max="2000" value="0">
+    </label>
+    <label>Translate Y: <span id="yVal">0</span>px 
+      <input type="range" id="y" min="-2000" max="2000" value="0">
+    </label>
+    <label>Scale: <span id="scaleVal">100</span>% 
+      <input type="range" id="scale" min="10" max="300" value="100">
+    </label>
+    <label>Rotate: <span id="rotVal">0</span>° 
+      <input type="range" id="rot" min="-180" max="180" value="0">
+    </label>
+    <label>Preview Opacity: <span id="opVal">50</span>% 
+      <input type="range" id="op" min="0" max="100" value="50">
+    </label>
+    
+    <button id="exportBtn">EXPORT REALIGNED MAP</button>
+  </div>
+  
+  <div class="preview">
+    <canvas id="canvas"></canvas>
+  </div>
+
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  let baseImg = new Image(), depthImg = new Image();
+  let hasBase = false, hasDepth = false;
+
+  const ui = ['x', 'y', 'scale', 'rot', 'op'].reduce((acc, id) => {
+    acc[id] = document.getElementById(id);
+    acc[id].addEventListener('input', (e) => {
+      document.getElementById(id + 'Val').innerText = e.target.value;
+      draw();
+    });
+    return acc;
+  }, {});
+
+  document.getElementById('baseUpload').onchange = e => loadImg(e, baseImg, () => hasBase = true);
+  document.getElementById('depthUpload').onchange = e => loadImg(e, depthImg, () => hasDepth = true);
+
+  function loadImg(e, imgObj, callback) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = event => {
+      imgObj.onload = () => { callback(); draw(); };
+      imgObj.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function draw() {
+    if (!hasBase) return;
+    
+    canvas.width = baseImg.width;
+    canvas.height = baseImg.height;
+    
+    // Draw Base
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1.0;
+    ctx.drawImage(baseImg, 0, 0);
+
+    // Draw Overlay
+    if (hasDepth) {
+      ctx.save();
+      ctx.globalAlpha = ui.op.value / 100;
+
+      const dx = parseInt(ui.x.value);
+      const dy = parseInt(ui.y.value);
+      const scale = parseInt(ui.scale.value) / 100;
+      const rot = parseInt(ui.rot.value) * Math.PI / 180;
+
+      ctx.translate(canvas.width / 2 + dx, canvas.height / 2 + dy);
+      ctx.rotate(rot);
+      ctx.scale(scale, scale);
+      ctx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
+      ctx.restore();
+    }
+  }
+
+  document.getElementById('exportBtn').onclick = () => {
+    if (!hasBase || !hasDepth) return alert('Load both images first.');
+    
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = baseImg.width;
+    exportCanvas.height = baseImg.height;
+    const eCtx = exportCanvas.getContext('2d');
+    
+    eCtx.save();
+    const dx = parseInt(ui.x.value);
+    const dy = parseInt(ui.y.value);
+    const scale = parseInt(ui.scale.value) / 100;
+    const rot = parseInt(ui.rot.value) * Math.PI / 180;
+
+    eCtx.translate(exportCanvas.width / 2 + dx, exportCanvas.height / 2 + dy);
+    eCtx.rotate(rot);
+    eCtx.scale(scale, scale);
+    eCtx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
+    eCtx.restore();
+
+    const link = document.createElement('a');
+    link.download = 'realigned_depth_map.png';
+    link.href = exportCanvas.toDataURL('image/png');
+    link.click();
+  };
+</script>
+</body>
+</html>
