@@ -4,10 +4,9 @@ on:
   repository_dispatch:
     types: [pipeline_trigger]
 
-# Only allow one pipeline operation at a time to prevent repo corruption
-concurrency:
-  group: paperplanes-sync
-  cancel-in-progress: false
+permissions:
+  contents: write
+  actions: read
 
 jobs:
   execute_step:
@@ -16,22 +15,17 @@ jobs:
       - name: Checkout reality
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install Base Dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pillow numpy opencv-python-headless
-
-      - name: Conditional AI Dependencies
-        if: github.event.client_payload.job == 'generate' || github.event.client_payload.job == 'depth'
-        run: |
-          pip install torch diffusers transformers accelerate google-generativeai
+          pip install google-generativeai torch diffusers transformers accelerate pillow numpy opencv-python-headless rembg[cli]
 
       - name: Execute Pipeline Job
         env:
@@ -47,9 +41,11 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add workspace/* || true
-          git add paper_planes_layers.zip || true
-          # Rebase is critical here to ensure we don't drift from main during long AI runs
-          git pull --rebase origin main
-          git commit -m "Step complete: ${{ github.event.client_payload.job }}" || echo "No changes"
-          git push origin main
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes."
+          else
+            git commit -m "Step complete: ${{ github.event.client_payload.job }}"
+            git pull --rebase origin main
+            git push origin main
+          fi
