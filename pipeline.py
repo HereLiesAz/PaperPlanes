@@ -139,7 +139,13 @@ def generate_image():
     pipe.safety_checker = None
     log(f"Pipeline loaded in {time.time() - start_time:.2f} seconds.")
     
-    prompt = "Turn this painting into a photograph"
+    prompt = os.getenv("CUSTOM_PROMPT", "").strip()
+    if not prompt:
+        prompt = "Turn this painting into a photograph"
+        log("No manual override detected. Executing default directive.")
+    else:
+        log("Manual override detected. Injecting user semantics.")
+
     log(f"Executing generation with prompt: '{prompt}'")
     log("Strength: 0.65, Guidance: 7.5")
     
