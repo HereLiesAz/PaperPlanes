@@ -101,7 +101,12 @@ async function executeStep(index) {
             terminalStatus.textContent = 'NETWORK FAULT';
         }
     } catch (error) {
-        log(`Transmission failed: ${error.message}`, "error");
+        log(`FATAL NETWORK EXCEPTION:`, "error");
+        log(`Name: ${error.name}`, "error");
+        log(`Message: ${error.message}`, "error");
+        log(`Stack: ${error.stack || 'Redacted by browser sandbox'}`, "error");
+        log(`DIAGNOSTIC: If the message is strictly "Failed to fetch", the browser assassinated the request for a CORS violation or the worker is entirely offline. JavaScript is blind to the details.`, "warn");
+        log(`MANUAL OVERRIDE: Press F12, open the 'Network' tab, trigger the pipeline again, and click the red failed request to read the raw headers.`, "warn");
         terminalStatus.textContent = 'OFFLINE';
     }
 }
