@@ -1,6 +1,6 @@
 /**
- * @fileoverview Logic for PaperPlanes. 
- * Orchestrates the sequential pipeline from 2D ingestion to 3D stratified output.
+ * @fileoverview Application logic for PaperPlanes.
+ * Manages the sequential paper theater pipeline and state transitions.
  */
 
 const show = (id) => document.getElementById(id).style.display = 'block';
@@ -15,12 +15,12 @@ window.addEventListener('DOMContentLoaded', () => {
         splash.style.opacity = '0';
         setTimeout(() => {
             splash.style.visibility = 'hidden';
-        }, 1500);
-    }, 2500);
+        }, 1200);
+    }, 2000);
 });
 
 /**
- * Tab Navigation
+ * Tab Navigation Logic
  */
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.onclick = () => {
@@ -32,18 +32,18 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 /**
- * Terminal Logging
+ * Terminal HUD Logic
  */
 const terminal = document.getElementById('terminal');
 const log = (msg) => {
     const line = document.createElement('div');
-    line.innerHTML = `<span style="color:#333">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+    line.innerHTML = `<span style="color:#444">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
     terminal.appendChild(line);
     terminal.scrollTop = terminal.scrollHeight;
 };
 
 /**
- * Pipeline Workflow Configuration
+ * Workflow Definition
  */
 const WORKFLOW = [
     { id: 'crop', key: 'output' },
@@ -59,7 +59,7 @@ let fileName = null;
 const proxy = "https://paperplanes.hereliesaz.workers.dev/api";
 
 /**
- * File Ingestion Handler
+ * Handle Source File Input
  */
 document.getElementById('sourceInput').onchange = (e) => {
     if (!e.target.files[0]) return;
@@ -76,20 +76,20 @@ document.getElementById('sourceInput').onchange = (e) => {
  * Initial Trigger
  */
 document.getElementById('processBtn').onclick = () => {
-    if (!base64) return alert("Source missing from theater.");
+    if (!base64) return alert("Select image to deconstruct.");
     hide('init-ui');
     execute(0);
 };
 
 /**
- * Execute Workflow Step
+ * Pipeline Execution and Polling
  * @param {number} idx - Step index
- * @param {string} coords - Manual warp coords
- * @param {string} prompt - Manual semantic prompt
+ * @param {string} coords - Manual warp coordinates
+ * @param {string} prompt - Manual semantic override
  */
 async function execute(idx, coords = "", prompt = "") {
     const step = WORKFLOW[idx];
-    log(`Deconstructing layer: ${step.id.toUpperCase()}...`);
+    log(`Deconstructing: ${step.id.toUpperCase()}`);
     hide('approval-ui'); hide('manual-crop-ui'); hide('manual-prompt-ui');
 
     try {
@@ -111,27 +111,24 @@ async function execute(idx, coords = "", prompt = "") {
             
             if (res.status === 'completed') {
                 clearInterval(poller);
-                if (step.id === 'segment') {
-                    log("Final stratification archived. The theater is complete.");
-                    return;
-                }
+                if (step.id === 'segment') return log("Theater deconstruction complete.");
                 if (coords || prompt) return execute(idx + 1);
                 
-                // Cache busting mandatory for GitHub artifact synchronization
+                // Cache busting via timestamp is critical to bypass CDN ghosts
                 document.getElementById('approval-preview').src = `${res.artifacts[step.key]}?t=${Date.now()}`;
                 show('approval-ui');
             } else if (res.status === 'failed') {
                 clearInterval(poller);
-                log(`CRITICAL FAULT: ${step.id} collapsed.`, 'error');
+                log(`CRITICAL: ${step.id} collapsed into the void.`, 'error');
             }
         }, 4000);
     } catch (err) {
-        log(`Network Dissonance: ${err.message}`);
+        log(`Dissonance: ${err.message}`);
     }
 }
 
 /**
- * Decision Gates
+ * Human Intervention Hooks
  */
 document.getElementById('btn-approve').onclick = () => {
     currentIdx++;
@@ -139,7 +136,7 @@ document.getElementById('btn-approve').onclick = () => {
 };
 
 document.getElementById('btn-reject').onclick = () => {
-    log("Human Intervention: Rejecting مشین outcome.");
+    log("Rejecting machine manifestation. Requesting human alignment.");
     if (currentIdx === 0) show('manual-crop-ui');
     else if (currentIdx === 1) show('manual-prompt-ui');
 };
