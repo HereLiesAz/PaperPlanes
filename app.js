@@ -73,7 +73,7 @@ async function executeStep(index) {
 
     terminalStatus.textContent = `EXECUTING: ${step.id.toUpperCase()}`;
     terminalStatus.style.color = '#ffaa00';
-    log(`--- INITIATING: ${step.name} ---`);
+    log(`--- INITIATING: ${step.title} ---`);
     document.getElementById('approval-ui').style.display = 'none';
 
     if (step.id === 'align') {
@@ -116,7 +116,7 @@ async function pollTelemetry(step) {
             clearInterval(pollInterval);
             terminalStatus.textContent = "AWAITING APPROVAL";
             terminalStatus.style.color = '#00ff00';
-            log(`${step.name} completed. Awaiting human consent.`, "info");
+            log(`${step.title} completed. Awaiting human consent.`, "info");
             
             if (step.id === 'segment') {
                 log("Final artifact paper_planes_layers.zip generated. Pipeline terminated.", "info");
@@ -146,7 +146,7 @@ document.getElementById('btn-approve').addEventListener('click', () => {
 });
 
 document.getElementById('btn-reject').addEventListener('click', () => {
-    log(`Human rejected artifact for ${WORKFLOW[currentStepIdx].name}. Halting.`, "error");
+    log(`Human rejected artifact for ${WORKFLOW[currentStepIdx].title}. Halting.`, "error");
     document.getElementById('approval-ui').style.display = 'none';
     document.getElementById('init-container').style.display = 'block';
 });
@@ -234,7 +234,6 @@ document.getElementById('exportBtn').addEventListener('click', () => {
     eCtx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
     eCtx.restore();
 
-    // In a real flow, this sends realigned_depth_map.png to the proxy. We simulate by downloading and progressing.
     const link = document.createElement('a');
     link.download = 'realigned_depth_map.png';
     link.href = exportCanvas.toDataURL('image/png');
