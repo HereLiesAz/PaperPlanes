@@ -3,32 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PaperPlanes</title>
+    <title>Paper Planes</title>
     <link rel="manifest" href="manifest.json">
     <style>
         :root {
-            --bg: #050505;
-            --layer-0: #121212;
-            --layer-1: #1a1a1a;
+            --bg: #0a0a0a;
+            --panel: #1a1a1a;
+            --border: #333;
             --accent: #007bff;
-            --telemetry: #00ff00;
-            --paper-shadow: 15px 15px 30px rgba(0,0,0,0.9);
-            --border: #2a2a2a;
+            --success: #00ff00;
+            --text: #d0d0d0;
+            --layer-shadow: 10px 10px 20px rgba(0,0,0,0.8);
         }
 
         body {
             background: var(--bg);
-            color: #ccc;
-            font-family: 'Courier New', Courier, monospace;
+            color: var(--text);
+            font-family: monospace;
+            padding: 0;
             margin: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
-            overflow-x: hidden;
         }
 
-        /* The Splash Screen: A Dramatic Prelude */
         #splash {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -38,242 +37,157 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            transition: opacity 1.2s cubic-bezier(0.4, 0, 0.2, 1), visibility 1.2s;
+            transition: opacity 1s, visibility 1s;
         }
 
-        .splash-inner {
-            border: 1px solid #333;
-            padding: 4rem;
-            text-align: center;
-            box-shadow: 0 0 40px rgba(255,255,255,0.02);
-        }
+        #splash h1 { color: #fff; letter-spacing: 10px; }
 
-        #splash h1 {
-            font-size: 2.5rem;
-            letter-spacing: 1.2rem;
-            color: #fff;
-            margin: 0;
-        }
-
-        #splash p {
-            font-size: 0.7rem;
-            color: #444;
-            margin-top: 1.5rem;
-            letter-spacing: 0.4rem;
-        }
-
-        /* The Theater Stage */
-        .stage-proscenium {
+        .stage {
             width: 100%;
-            max-width: 850px;
-            margin-top: 5rem;
+            max-width: 800px;
+            margin-top: 50px;
             padding: 20px;
-            position: relative;
         }
 
-        .tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: -2px;
-            position: relative;
-            z-index: 20;
-        }
+        .tabs { display: flex; gap: 5px; }
 
         .tab-btn {
-            padding: 0.8rem 2rem;
-            background: var(--layer-1);
-            color: #444;
-            border: 2px solid var(--border);
+            padding: 10px 20px;
+            background: #222;
+            color: #666;
+            border: 1px solid var(--border);
             border-bottom: none;
             cursor: pointer;
-            font-weight: bold;
-            font-family: inherit;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: all 0.2s;
         }
 
         .tab-btn.active {
+            background: var(--panel);
             color: #fff;
-            background: var(--layer-0);
             border-color: var(--accent);
-            padding-top: 1rem;
-            margin-top: -0.2rem;
-            box-shadow: 0 -5px 15px rgba(0,0,0,0.5);
         }
 
         .container {
-            background: var(--layer-0);
-            border: 2px solid var(--border);
-            padding: 3rem;
-            box-shadow: var(--paper-shadow);
-            position: relative;
-            z-index: 10;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            padding: 30px;
+            box-shadow: var(--layer-shadow);
+            margin-bottom: 20px;
         }
 
-        /* Simulated Strata Layers */
-        .container::before, .container::after {
-            content: '';
-            position: absolute;
-            background: #0a0a0a;
-            border: 1px solid #1a1a1a;
-            z-index: -1;
-            pointer-events: none;
-        }
-
-        .container::before { top: 8px; left: 8px; right: -8px; bottom: -8px; }
-        .container::after { top: 16px; left: 16px; right: -16px; bottom: -16px; }
-
-        .tab-content { display: none; width: 100%; }
-        .tab-content.active { display: block; animation: strataIn 0.6s ease-out; }
-
-        @keyframes strataIn {
-            from { opacity: 0; transform: translateY(15px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
 
         .action-btn {
             width: 100%;
-            padding: 1.2rem;
+            padding: 15px;
             background: var(--accent);
             color: #fff;
             border: none;
             cursor: pointer;
             font-weight: bold;
-            font-family: inherit;
             margin-top: 15px;
-            box-shadow: 4px 4px 0 #000;
-            text-transform: uppercase;
-            letter-spacing: 2px;
         }
 
-        .action-btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #000; }
-
-        .terminal-container {
-            width: 100%;
+        .terminal-wrap {
             background: #000;
-            border: 2px solid #1a1a1a;
-            margin-top: 2rem;
-            box-shadow: var(--paper-shadow);
+            border: 1px solid var(--border);
+            margin-top: 20px;
         }
 
-        .term-header {
-            background: #0a0a0a;
-            padding: 0.6rem 1.2rem;
-            font-size: 0.75rem;
-            color: #444;
-            border-bottom: 1px solid #1a1a1a;
+        .term-head {
+            background: #111;
+            padding: 5px 10px;
+            font-size: 12px;
+            color: #555;
             display: flex;
             justify-content: space-between;
         }
 
         #terminal {
-            height: 220px;
+            height: 150px;
+            padding: 10px;
             overflow-y: auto;
-            padding: 1rem;
-            font-size: 0.85rem;
-            color: var(--telemetry);
-            line-height: 1.5;
+            color: var(--success);
+            font-size: 13px;
         }
 
         .step-overlay {
             display: none;
-            background: #0d0d0d;
-            padding: 2.5rem;
-            border: 1px solid #222;
-            margin-top: 2rem;
+            background: #111;
+            border: 1px solid #333;
+            padding: 20px;
+            margin-top: 20px;
             text-align: center;
-            box-shadow: var(--paper-shadow);
         }
 
         #approval-preview, #cropCanvas {
             max-width: 100%;
-            border: 10px solid #000;
+            border: 2px solid #000;
             margin: 20px 0;
-            background: #000;
         }
 
-        input[type="text"] {
+        input[type="text"], input[type="range"] {
             width: 100%;
-            padding: 1rem;
-            background: #000;
-            border: 1px solid #333;
-            color: #fff;
-            font-family: inherit;
-            box-sizing: border-box;
+            margin: 10px 0;
         }
-
-        input[type="range"] {
-            width: 100%;
-            accent-color: var(--accent);
-            margin: 1rem 0;
-        }
-
-        label { font-size: 0.8rem; color: #666; text-transform: uppercase; }
-        h2 { border-bottom: 1px solid #222; padding-bottom: 0.5rem; letter-spacing: 2px; }
     </style>
 </head>
 <body>
 
     <div id="splash">
-        <div class="splash-inner">
-            <h1>PAPER PLANES</h1>
-            <p>THEATRICAL DECONSTRUCTION ENGINE</p>
-        </div>
+        <h1>PAPER PLANES</h1>
     </div>
 
-    <div class="stage-proscenium">
+    <div class="stage">
         <div class="tabs">
-            <button class="tab-btn active" data-target="pipeline-tab">Pipeline</button>
-            <button class="tab-btn" data-target="realigner-tab">Realigner</button>
+            <button class="tab-btn active" data-target="pipeline-tab">PIPELINE</button>
+            <button class="tab-btn" data-target="realigner-tab">STUDIO</button>
         </div>
 
         <div id="pipeline-tab" class="tab-content active">
             <div class="container" id="init-ui">
-                <label>Ingest Source</label>
-                <input type="file" id="sourceInput" accept="image/*" style="display:block; margin: 1.5rem 0;">
+                <label>FILE</label>
+                <input type="file" id="sourceInput" accept="image/*">
                 
-                <label>Target Strata: <span id="layerDisplay" style="color:var(--accent)">6</span></label>
+                <label>LAYERS: <span id="layerDisplay">6</span></label>
                 <input type="range" id="layersInput" min="2" max="12" value="6">
                 
-                <button id="processBtn" class="action-btn">Commence Deconstruction</button>
+                <button id="processBtn" class="action-btn">START</button>
             </div>
 
-            <div class="terminal-container">
-                <div class="term-header"><span>LOG_TELEMETRY</span><span id="terminalStatus">IDLE</span></div>
+            <div class="terminal-wrap">
+                <div class="term-head"><span>LOG</span><span id="terminalStatus">IDLE</span></div>
                 <div id="terminal"></div>
             </div>
 
             <div id="approval-ui" class="step-overlay">
-                <h2 id="approval-title">Manifestation Check</h2>
+                <h2>PREVIEW</h2>
                 <img id="approval-preview" src="">
                 <div style="display: flex; gap: 10px;">
-                    <button id="btn-approve" class="action-btn" style="background: #1a1a1a; border: 1px solid var(--telemetry); color: var(--telemetry);">APPROVE</button>
-                    <button id="btn-reject" class="action-btn" style="background: #1a1a1a; border: 1px solid #ff4444; color: #ff4444;">REJECT</button>
+                    <button id="btn-approve" class="action-btn">APPROVE</button>
+                    <button id="btn-reject" class="action-btn" style="background: #555;">REJECT</button>
                 </div>
             </div>
 
             <div id="manual-crop-ui" class="step-overlay">
-                <h2>Geometric Adjustment</h2>
+                <h2>CROP</h2>
                 <canvas id="cropCanvas"></canvas>
-                <button id="btn-submit-crop" class="action-btn">Finalize Warp</button>
+                <button id="btn-submit-crop" class="action-btn">SUBMIT</button>
             </div>
 
             <div id="manual-prompt-ui" class="step-overlay">
-                <h2>Hallucination Guidance</h2>
-                <input type="text" id="customPromptInput" placeholder="Enter new prompt instructions...">
-                <button id="btn-submit-prompt" class="action-btn">Force Re-Generation</button>
+                <h2>PROMPT</h2>
+                <input type="text" id="customPromptInput">
+                <button id="btn-submit-prompt" class="action-btn">REGENERATE</button>
             </div>
         </div>
 
         <div id="realigner-tab" class="tab-content">
             <div class="container">
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                    <div><label>Base Layer</label><input type="file" id="baseUpload"></div>
-                    <div><label>Depth Map</label><input type="file" id="depthUpload"></div>
-                </div>
-                <canvas id="canvas" style="width:100%; height: 400px; background:#000; margin: 20px 0;"></canvas>
-                <button id="exportBtn" class="action-btn">Export Theater Package</button>
+                <input type="file" id="baseUpload">
+                <input type="file" id="depthUpload">
+                <canvas id="canvas" style="width:100%; height: 300px; background:#000; margin-top:10px;"></canvas>
+                <button id="exportBtn" class="action-btn">EXPORT</button>
             </div>
         </div>
     </div>
