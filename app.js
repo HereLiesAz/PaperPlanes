@@ -29,7 +29,6 @@ if (slider && display) {
     slider.addEventListener('input', (e) => display.textContent = e.target.value);
 }
 
-// --- PIPELINE WIZARD STATE MACHINE ---
 const WORKFLOW = [
     { id: 'crop', title: 'Step 1: Perspective & Crop Validation', output: '/workspace/cropped_image.png' },
     { id: 'generate', title: 'Step 2: AI Hallucination Validation', output: '/workspace/generated_image.png' },
@@ -51,7 +50,6 @@ document.getElementById('sourceInput').addEventListener('change', (e) => {
     reader.onload = function(event) {
         base64Payload = event.target.result.split(',')[1];
         currentFileName = file.name;
-        // Pre-load realigner base
         loadImg(e, baseImg, () => { hasBase = true; drawCanvas(); });
     };
     reader.readAsDataURL(file);
@@ -67,7 +65,7 @@ document.getElementById('processBtn').addEventListener('click', () => {
     executeStep(currentStepIdx);
 });
 
-async function executeStep(index) {
+async function executeStep(index, manualCoords = null) {
     const step = WORKFLOW[index];
     if (!step) return;
 
@@ -75,6 +73,7 @@ async function executeStep(index) {
     terminalStatus.style.color = '#ffaa00';
     log(`--- INITIATING: ${step.title} ---`);
     document.getElementById('approval-ui').style.display = 'none';
+    document.getElementById('manual-crop-ui').style.display = 'none';
 
     if (step.id === 'align') {
         log("Redirecting to Realigner Tab for manual override.", "warn");
@@ -83,30 +82,38 @@ async function executeStep(index) {
     }
 
     try {
+        const payloadStr = JSON.stringify({
+            path: `inbox/${currentFileName}`,
+            content: base64Payload,
+            job: step.id,
+            layers: document.getElementById('layersInput').value,
+            coords: manualCoords || ""
+        });
+
         const response = await fetch(proxyUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                path: `inbox/${currentFileName}`,
-                content: base64Payload,
-                job: step.id,
-                layers: document.getElementById('layersInput').value
-            })
+            body: payloadStr
         });
 
-        if (response.ok) {
+        const responseText = await response.text();
+        let data = {};
+        try { data = JSON.parse(responseText); } catch (e) { data = { raw: responseText }; }
+
+        if (response.ok && !data.error) {
             pollInterval = setInterval(() => pollTelemetry(step), 5000);
         } else {
-            log(`Proxy HTTP ${response.status}`, "error");
-            terminalStatus.textContent = 'NETWORK FAULT';
+            log(`PROXY REJECTION [HTTP ${response.status}]:`, "error");
+            if (data.error) {
+                log(`Type: ${data.error}`, "error");
+                log(`Details: ${data.details || data.message || 'None'}`, "error");
+            } else {
+                log(`Raw Body: ${data.raw}`, "error");
+            }
+            terminalStatus.textContent = 'FAULT';
         }
     } catch (error) {
-        log(`FATAL NETWORK EXCEPTION:`, "error");
-        log(`Name: ${error.name}`, "error");
-        log(`Message: ${error.message}`, "error");
-        log(`Stack: ${error.stack || 'Redacted by browser sandbox'}`, "error");
-        log(`DIAGNOSTIC: If the message is strictly "Failed to fetch", the browser assassinated the request for a CORS violation or the worker is entirely offline. JavaScript is blind to the details.`, "warn");
-        log(`MANUAL OVERRIDE: Press F12, open the 'Network' tab, trigger the pipeline again, and click the red failed request to read the raw headers.`, "warn");
+        log(`FATAL NETWORK EXCEPTION: ${error.message}`, "error");
         terminalStatus.textContent = 'OFFLINE';
     }
 }
@@ -128,13 +135,11 @@ async function pollTelemetry(step) {
                 return;
             }
 
-            // Present approval UI
             const outUrl = data.artifacts?.output || step.output;
             document.getElementById('approval-title').textContent = step.title;
             document.getElementById('approval-preview').src = outUrl;
             document.getElementById('approval-ui').style.display = 'block';
             
-            // Wire depth map into realigner proactively
             if (step.id === 'depth') {
                 depthImg.onload = () => { hasDepth = true; drawCanvas(); };
                 depthImg.src = outUrl;
@@ -151,9 +156,130 @@ document.getElementById('btn-approve').addEventListener('click', () => {
 });
 
 document.getElementById('btn-reject').addEventListener('click', () => {
-    log(`Human rejected artifact for ${WORKFLOW[currentStepIdx].title}. Halting.`, "error");
+    log(`Human rejected artifact for ${WORKFLOW[currentStepIdx].title}.`, "error");
+    if (currentStepIdx === 0) {
+        log("Auto-detection failed. Summoning manual vector tools.", "warn");
+        initCropUI();
+    } else {
+        log("Halting sequence entirely.", "error");
+        document.getElementById('approval-ui').style.display = 'none';
+        document.getElementById('init-container').style.display = 'block';
+    }
+});
+
+// --- MANUAL CROP MODULE ---
+const cropCanvas = document.getElementById('cropCanvas');
+const cropCtx = cropCanvas ? cropCanvas.getContext('2d') : null;
+let cropPoints = [];
+let draggingPoint = null;
+
+function initCropUI() {
+    if (!hasBase) return;
     document.getElementById('approval-ui').style.display = 'none';
-    document.getElementById('init-container').style.display = 'block';
+    document.getElementById('manual-crop-ui').style.display = 'block';
+
+    cropCanvas.width = baseImg.width;
+    cropCanvas.height = baseImg.height;
+
+    const w = baseImg.width;
+    const h = baseImg.height;
+    const inset = Math.min(w, h) * 0.1;
+
+    cropPoints = [
+        {x: inset, y: inset},
+        {x: w - inset, y: inset},
+        {x: w - inset, y: h - inset},
+        {x: inset, y: h - inset}
+    ];
+    drawCropCanvas();
+}
+
+function drawCropCanvas() {
+    if (!cropCtx) return;
+    cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+    cropCtx.drawImage(baseImg, 0, 0);
+
+    cropCtx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    cropCtx.beginPath();
+    cropCtx.moveTo(0, 0);
+    cropCtx.lineTo(cropCanvas.width, 0);
+    cropCtx.lineTo(cropCanvas.width, cropCanvas.height);
+    cropCtx.lineTo(0, cropCanvas.height);
+    cropCtx.closePath();
+
+    cropCtx.moveTo(cropPoints[0].x, cropPoints[0].y);
+    cropCtx.lineTo(cropPoints[3].x, cropPoints[3].y);
+    cropCtx.lineTo(cropPoints[2].x, cropPoints[2].y);
+    cropCtx.lineTo(cropPoints[1].x, cropPoints[1].y);
+    cropCtx.closePath();
+    cropCtx.fill('evenodd');
+
+    cropCtx.strokeStyle = '#00ff00';
+    cropCtx.lineWidth = Math.max(2, cropCanvas.width / 300);
+    cropCtx.beginPath();
+    cropCtx.moveTo(cropPoints[0].x, cropPoints[0].y);
+    cropCtx.lineTo(cropPoints[1].x, cropPoints[1].y);
+    cropCtx.lineTo(cropPoints[2].x, cropPoints[2].y);
+    cropCtx.lineTo(cropPoints[3].x, cropPoints[3].y);
+    cropCtx.closePath();
+    cropCtx.stroke();
+
+    const radius = Math.max(10, cropCanvas.width / 100);
+    cropCtx.fillStyle = '#ff4444';
+    cropPoints.forEach(p => {
+        cropCtx.beginPath();
+        cropCtx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        cropCtx.fill();
+        cropCtx.stroke();
+    });
+}
+
+function getMousePos(evt) {
+    const rect = cropCanvas.getBoundingClientRect();
+    const scaleX = cropCanvas.width / rect.width;
+    const scaleY = cropCanvas.height / rect.height;
+    let clientX = evt.clientX;
+    let clientY = evt.clientY;
+    if (evt.touches && evt.touches.length > 0) {
+        clientX = evt.touches[0].clientX;
+        clientY = evt.touches[0].clientY;
+    }
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
+}
+
+if (cropCanvas) {
+    const downEvent = (e) => {
+        e.preventDefault();
+        const pos = getMousePos(e);
+        const hitRadius = Math.max(30, cropCanvas.width / 40);
+        draggingPoint = cropPoints.find(p => Math.hypot(p.x - pos.x, p.y - pos.y) < hitRadius);
+    };
+    const moveEvent = (e) => {
+        if (!draggingPoint) return;
+        e.preventDefault();
+        const pos = getMousePos(e);
+        draggingPoint.x = Math.max(0, Math.min(cropCanvas.width, pos.x));
+        draggingPoint.y = Math.max(0, Math.min(cropCanvas.height, pos.y));
+        drawCropCanvas();
+    };
+    const upEvent = () => draggingPoint = null;
+
+    cropCanvas.addEventListener('mousedown', downEvent);
+    cropCanvas.addEventListener('mousemove', moveEvent);
+    cropCanvas.addEventListener('mouseup', upEvent);
+    cropCanvas.addEventListener('mouseleave', upEvent);
+    cropCanvas.addEventListener('touchstart', downEvent, {passive: false});
+    cropCanvas.addEventListener('touchmove', moveEvent, {passive: false});
+    cropCanvas.addEventListener('touchend', upEvent);
+}
+
+document.getElementById('btn-submit-crop').addEventListener('click', () => {
+    const coordsStr = cropPoints.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join(',');
+    log(`Transmitting manual vectors: [${coordsStr}]`, "warn");
+    executeStep(currentStepIdx, coordsStr);
 });
 
 // --- REALIGNER MODULE ---
@@ -194,10 +320,8 @@ function loadImg(e, imgObj, callback) {
 
 function drawCanvas() {
     if (!hasBase || !ctx) return;
-    
     canvas.width = baseImg.width;
     canvas.height = baseImg.height;
-    
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.globalAlpha = 1.0;
     ctx.drawImage(baseImg, 0, 0);
@@ -205,12 +329,10 @@ function drawCanvas() {
     if (hasDepth) {
         ctx.save();
         ctx.globalAlpha = ui.op.value / 100;
-
         const dx = parseInt(ui.x.value);
         const dy = parseInt(ui.y.value);
         const scale = parseInt(ui.scale.value) / 100;
         const rot = parseInt(ui.rot.value) * Math.PI / 180;
-
         ctx.translate(canvas.width / 2 + dx, canvas.height / 2 + dy);
         ctx.rotate(rot);
         ctx.scale(scale, scale);
@@ -221,18 +343,15 @@ function drawCanvas() {
 
 document.getElementById('exportBtn').addEventListener('click', () => {
     if (!hasBase || !hasDepth) return alert('Load both images first.');
-    
     const exportCanvas = document.createElement('canvas');
     exportCanvas.width = baseImg.width;
     exportCanvas.height = baseImg.height;
     const eCtx = exportCanvas.getContext('2d');
-    
     eCtx.save();
     const dx = parseInt(ui.x.value);
     const dy = parseInt(ui.y.value);
     const scale = parseInt(ui.scale.value) / 100;
     const rot = parseInt(ui.rot.value) * Math.PI / 180;
-
     eCtx.translate(exportCanvas.width / 2 + dx, exportCanvas.height / 2 + dy);
     eCtx.rotate(rot);
     eCtx.scale(scale, scale);
