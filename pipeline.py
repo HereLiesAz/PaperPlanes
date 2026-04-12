@@ -42,6 +42,34 @@ def perspective_crop():
     image = cv2.imread(file_path)
     orig = image.copy()
     
+    manual_coords = os.getenv("MANUAL_COORDS", "").strip()
+    if manual_coords:
+        log(f"Manual reality override detected. Injecting coordinates: {manual_coords}")
+        pts = np.array([float(x) for x in manual_coords.split(',')]).reshape(4, 2)
+        rect = order_points(pts)
+        (tl, tr, br, bl) = rect
+        
+        widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+        widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+        maxWidth = max(int(widthA), int(widthB))
+        
+        heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+        heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+        maxHeight = max(int(heightA), int(heightB))
+        
+        dst = np.array([
+            [0, 0],
+            [maxWidth - 1, 0],
+            [maxWidth - 1, maxHeight - 1],
+            [0, maxHeight - 1]], dtype="float32")
+            
+        M = cv2.getPerspectiveTransform(rect, dst)
+        warped = cv2.warpPerspective(orig, M, (maxWidth, maxHeight))
+        
+        cv2.imwrite("workspace/cropped_image.png", warped)
+        log("Manual mathematical amputation successful. Saved to workspace/cropped_image.png")
+        return
+    
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
     edged = cv2.Canny(gray, 75, 200)
@@ -58,7 +86,7 @@ def perspective_crop():
             break
             
     if screenCnt is not None:
-        log("Painting boundaries detected. Warping perspective to face straight on and amputating periphery.")
+        log("Painting boundaries detected. Warping perspective to face straight on.")
         pts = screenCnt.reshape(4, 2)
         rect = order_points(pts)
         (tl, tr, br, bl) = rect
@@ -83,7 +111,7 @@ def perspective_crop():
         cv2.imwrite("workspace/cropped_image.png", warped)
         log("Cropped and warped image saved to workspace/cropped_image.png")
     else:
-        log("No definitive 4-point boundaries found. Reality is too messy. Preserving original bounds.")
+        log("No definitive 4-point boundaries found. Preserving original bounds.")
         cv2.imwrite("workspace/cropped_image.png", orig)
 
 def generate_image():
