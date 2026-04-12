@@ -38,6 +38,11 @@
         #approval-title { margin-top: 0; color: #fff; font-size: 1.2rem; }
         #approval-preview { max-width: 100%; max-height: 400px; border: 1px solid #555; border-radius: 4px; margin-bottom: 1rem; display: block; margin-left: auto; margin-right: auto; }
 
+        #manual-crop-ui { display: none; background: #252525; padding: 1.5rem; border: 1px solid #444; border-radius: 8px; margin-top: 1rem; width: 100%; box-sizing: border-box; text-align: center; }
+        #manual-crop-ui h2 { color: #fff; margin-top: 0; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 0.5rem; }
+        .crop-wrapper { position: relative; display: inline-block; max-width: 100%; margin-top: 10px; }
+        #cropCanvas { max-width: 100%; max-height: 60vh; border: 1px solid #555; border-radius: 4px; cursor: crosshair; touch-action: none; display: block; }
+
         .realigner-wrapper { display: flex; gap: 20px; width: 100%; align-items: flex-start; }
         @media (max-width: 768px) { .realigner-wrapper { flex-direction: column; } }
         .controls { flex: 0 0 300px; display: flex; flex-direction: column; gap: 15px; background: #1e1e1e; padding: 20px; border-radius: 8px; border: 1px solid #333; box-sizing: border-box; }
@@ -84,8 +89,17 @@
             <img id="approval-preview" src="" alt="Artifact">
             <div style="display: flex; gap: 15px; justify-content: center;">
                 <button id="btn-approve" class="action-btn" style="background: #28a745; width: auto; padding: 1rem 2rem;">Approve & Proceed</button>
-                <button id="btn-reject" class="action-btn" style="background: #dc3545; width: auto; padding: 1rem 2rem;">Reject / Halt</button>
+                <button id="btn-reject" class="action-btn" style="background: #dc3545; width: auto; padding: 1rem 2rem;">Reject Override</button>
             </div>
+        </div>
+
+        <div id="manual-crop-ui">
+            <h2>MANUAL PERSPECTIVE WARP</h2>
+            <p style="color: #aaa; font-size: 0.9rem; margin: 0;">Drag the vertices to define the true mathematical bounds.</p>
+            <div class="crop-wrapper">
+                <canvas id="cropCanvas"></canvas>
+            </div>
+            <button id="btn-submit-crop" class="action-btn" style="background: #007bff; width: 100%; margin-top: 15px;">EXECUTE WARP & PROCEED</button>
         </div>
     </div>
 
