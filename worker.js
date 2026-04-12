@@ -22,7 +22,7 @@ export default {
         });
       }
 
-      // --- IMAGE PROXY ENDPOINT (GET with ?file=...) ---
+      // --- IMAGE PROXY ENDPOINT ---
       const fileParam = url.searchParams.get("file");
       if (request.method === "GET" && fileParam) {
         const fileRes = await fetch(`https://api.github.com/repos/${repo}/contents/${fileParam}`, {
@@ -34,15 +34,25 @@ export default {
         });
 
         if (!fileRes.ok) {
-          return new Response("Artifact not found or still generating", { status: 404, headers: corsHeaders });
+          return new Response("Artifact not yet pushed to GitHub main branch.", { 
+            status: 404, 
+            headers: corsHeaders 
+          });
         }
 
-        const headers = new Headers(fileRes.headers);
-        headers.set("Access-Control-Allow-Origin", "*");
-        return new Response(fileRes.body, { headers });
+        // Force the content type so the browser doesn't try to download it as a 'file'
+        const contentType = fileParam.endsWith('.png') ? 'image/png' : 'image/jpeg';
+        
+        return new Response(fileRes.body, { 
+          headers: {
+            ...corsHeaders,
+            "Content-Type": contentType,
+            "Cache-Control": "no-cache, no-store, must-revalidate"
+          } 
+        });
       }
 
-      // --- POLLING ENDPOINT (GET) ---
+      // --- POLLING ENDPOINT ---
       if (request.method === "GET") {
         const headers = {
           "User-Agent": "Cloudflare-Worker",
@@ -52,14 +62,20 @@ export default {
 
         const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=1`, { headers });
         if (!runsRes.ok) {
-          return new Response(JSON.stringify({ error: "GITHUB API REJECTED GET", details: await runsRes.text() }), { status: 418, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          return new Response(JSON.stringify({ error: "GITHUB API REJECTED GET", details: await runsRes.text() }), { 
+            status: 418, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+          });
         }
 
         const runsData = await runsRes.json();
         const latestRun = runsData.workflow_runs[0];
 
         if (!latestRun) {
-          return new Response(JSON.stringify({ status: "idle", conclusion: null, jobs: [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          return new Response(JSON.stringify({ status: "idle", conclusion: null, jobs: [] }), { 
+            status: 200, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+          });
         }
 
         const jobsRes = await fetch(latestRun.jobs_url, { headers });
@@ -80,17 +96,16 @@ export default {
           }
         };
 
-        return new Response(JSON.stringify(payload), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify(payload), { 
+          status: 200, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
       }
 
-      // --- TRIGGER ENDPOINT (POST) ---
+      // --- TRIGGER ENDPOINT ---
       if (request.method === "POST") {
         const body = await request.json();
         const { path, content, message, job, layers, coords, prompt } = body;
-
-        if (!path || !content) {
-          return new Response(JSON.stringify({ error: "MALFORMED PAYLOAD" }), { status: 418, headers: corsHeaders });
-        }
 
         const headers = {
           "User-Agent": "Cloudflare-Worker",
@@ -106,21 +121,22 @@ export default {
           fileSha = fileData.sha;
         }
 
-        const putBody = {
-          message: message || "Automated payload injection via UI proxy",
-          content: content,
-          branch: "main"
-        };
-        if (fileSha) putBody.sha = fileSha;
-
         const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
           method: "PUT",
           headers: headers,
-          body: JSON.stringify(putBody)
+          body: JSON.stringify({
+            message: message || "Automated payload injection",
+            content: content,
+            branch: "main",
+            sha: fileSha || undefined
+          })
         });
 
         if (!putRes.ok) {
-          return new Response(JSON.stringify({ error: "GITHUB API REJECTED PUT", details: await putRes.text() }), { status: 418, headers: corsHeaders });
+          return new Response(JSON.stringify({ error: "UPLOAD FAILED", details: await putRes.text() }), { 
+            status: 418, 
+            headers: corsHeaders 
+          });
         }
 
         const dispatchRes = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
@@ -128,27 +144,26 @@ export default {
           headers: headers,
           body: JSON.stringify({
             event_type: "pipeline_trigger",
-            client_payload: {
-              job: job || "segment",
-              layers: layers || "6",
-              file: path,
-              coords: coords || "",
-              prompt: prompt || ""
-            }
+            client_payload: { job, layers, file: path, coords, prompt }
           })
         });
 
-        if (!dispatchRes.ok) {
-          return new Response(JSON.stringify({ error: "GITHUB API REJECTED DISPATCH", details: await dispatchRes.text() }), { status: 418, headers: corsHeaders });
-        }
-
-        return new Response(JSON.stringify({ success: true, message: "Payload delivered. GitHub Runner awoken." }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ success: true }), { 
+          status: 200, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
       }
 
-      return new Response(JSON.stringify({ error: "Method Not Allowed" }), { status: 405, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), { 
+        status: 405, 
+        headers: corsHeaders 
+      });
 
     } catch (error) {
-      return new Response(JSON.stringify({ error: "WORKER FATAL CRASH", message: error.message, stack: error.stack }), { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "CRASH", message: error.message }), { 
+        status: 202, 
+        headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      });
     }
   }
 };
