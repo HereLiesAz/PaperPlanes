@@ -30,11 +30,11 @@ if (slider && display) {
 }
 
 const WORKFLOW = [
-    { id: 'crop', title: 'Step 1: Perspective & Crop Validation', output: '/workspace/cropped_image.png' },
-    { id: 'generate', title: 'Step 2: AI Hallucination Validation', output: '/workspace/generated_image.png' },
-    { id: 'depth', title: 'Step 3: Depth Map Extraction', output: '/workspace/raw_depth_map.png' },
-    { id: 'align', title: 'Step 4: Manual Realignment', output: null },
-    { id: 'segment', title: 'Step 5: Final Segmentation', output: '/workspace/paper_planes_layers.zip' }
+    { id: 'crop', title: 'Step 1: Perspective & Crop Validation', output: '/workspace/cropped_image.png', artKey: 'output' },
+    { id: 'generate', title: 'Step 2: AI Hallucination Validation', output: '/workspace/generated_image.png', artKey: 'photo' },
+    { id: 'depth', title: 'Step 3: Depth Map Extraction', output: '/workspace/raw_depth_map.png', artKey: 'depth' },
+    { id: 'align', title: 'Step 4: Manual Realignment', output: null, artKey: null },
+    { id: 'segment', title: 'Step 5: Final Segmentation', output: '/workspace/paper_planes_layers.zip', artKey: null }
 ];
 
 let currentStepIdx = 0;
@@ -173,7 +173,8 @@ async function pollTelemetry(step) {
             terminalStatus.style.color = '#00ff00';
             log(`${step.title} completed. Awaiting human consent.`, "info");
             
-            const outUrl = data.artifacts?.output || step.output;
+            // Correctly route the CDN link based on the specific artifact key for this step
+            const outUrl = data.artifacts?.[step.artKey] || step.output;
             document.getElementById('approval-title').textContent = step.title;
             document.getElementById('approval-preview').src = outUrl;
             document.getElementById('approval-ui').style.display = 'block';
