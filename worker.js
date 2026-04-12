@@ -1,165 +1,265 @@
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(err => console.error(err));
+}
 
-export default {
-  async fetch(request, env, ctx) {
-    // 1. Pacify the Browser's CORS Preflight
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.target).classList.add('active');
+    });
+});
+
+const terminal = document.getElementById('terminal');
+const terminalStatus = document.getElementById('terminalStatus');
+
+function log(msg, level = 'info') {
+    const now = new Date();
+    const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+    const line = document.createElement('div');
+    line.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="log-${level}">${msg}</span>`;
+    terminal.appendChild(line);
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+const slider = document.getElementById('layersInput');
+const display = document.getElementById('layerDisplay');
+if (slider && display) {
+    slider.addEventListener('input', (e) => display.textContent = e.target.value);
+}
+
+// --- PIPELINE WIZARD STATE MACHINE ---
+const WORKFLOW = [
+    { id: 'crop', title: 'Step 1: Perspective & Crop Validation', output: '/workspace/cropped_image.png' },
+    { id: 'generate', title: 'Step 2: AI Hallucination Validation', output: '/workspace/generated_image.png' },
+    { id: 'depth', title: 'Step 3: Depth Map Extraction', output: '/workspace/raw_depth_map.png' },
+    { id: 'align', title: 'Step 4: Manual Realignment', output: null },
+    { id: 'segment', title: 'Step 5: Final Segmentation', output: '/workspace/paper_planes_layers.zip' }
+];
+
+let currentStepIdx = 0;
+let pollInterval = null;
+const proxyUrl = "https://paperplanes.hereliesaz.workers.dev/api"; 
+let base64Payload = null;
+let currentFileName = null;
+
+document.getElementById('sourceInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        base64Payload = event.target.result.split(',')[1];
+        currentFileName = file.name;
+        // Pre-load realigner base
+        loadImg(e, baseImg, () => { hasBase = true; drawCanvas(); });
+    };
+    reader.readAsDataURL(file);
+});
+
+document.getElementById('processBtn').addEventListener('click', () => {
+    if (!base64Payload) {
+        log("FATAL: Source image required.", "error");
+        return;
+    }
+    document.getElementById('init-container').style.display = 'none';
+    currentStepIdx = 0;
+    executeStep(currentStepIdx);
+});
+
+async function executeStep(index) {
+    const step = WORKFLOW[index];
+    if (!step) return;
+
+    terminalStatus.textContent = `EXECUTING: ${step.id.toUpperCase()}`;
+    terminalStatus.style.color = '#ffaa00';
+    log(`--- INITIATING: ${step.title} ---`);
+    document.getElementById('approval-ui').style.display = 'none';
+
+    if (step.id === 'align') {
+        log("Redirecting to Realigner Tab for manual override.", "warn");
+        document.querySelector('[data-target="realigner-tab"]').click();
+        return;
     }
 
     try {
-      // --- POLLING ENDPOINT (GET) ---
-      if (request.method === "GET") {
-        const repo = env.GH_REPO;
-        const githubToken = env.GH_TOKEN; 
-        
-        if (!githubToken || !repo) {
-          return new Response(JSON.stringify({ error: "GH_TOKEN or GH_REPO secret not configured in worker environment." }), { 
-            status: 500, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
-        }
-
-        const headers = {
-          "User-Agent": "Cloudflare-Worker",
-          "Authorization": `Bearer ${githubToken}`,
-          "Accept": "application/vnd.github.v3+json"
-        };
-
-        // Fetch the latest workflow run
-        const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=1`, { headers });
-        if (!runsRes.ok) {
-          return new Response(JSON.stringify({ error: "Failed to fetch GitHub Actions telemetry." }), { 
-            status: runsRes.status, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
-        }
-
-        const runsData = await runsRes.json();
-        const latestRun = runsData.workflow_runs[0];
-
-        if (!latestRun) {
-          return new Response(JSON.stringify({ status: "idle", conclusion: null, jobs: [] }), { 
-            status: 200, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
-        }
-
-        // Fetch individual jobs for the latest run
-        const jobsRes = await fetch(latestRun.jobs_url, { headers });
-        const jobsData = jobsRes.ok ? await jobsRes.json() : { jobs: [] };
-
-        // Return standardized telemetry payload to the frontend
-        const payload = {
-          status: latestRun.status,
-          conclusion: latestRun.conclusion,
-          jobs: jobsData.jobs || [],
-          artifacts: {
-            output: `/workspace/cropped_image.png`, 
-            photo: `/workspace/generated_image.png`,
-            depth: `/workspace/raw_depth_map.png`
-          }
-        };
-
-        return new Response(JSON.stringify(payload), {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      }
-
-      // --- TRIGGER ENDPOINT (POST) ---
-      if (request.method === "POST") {
-        const body = await request.json();
-        const { path, content, message, job, layers } = body;
-        const repo = env.GH_REPO;
-        const githubToken = env.GH_TOKEN;
-
-        if (!githubToken || !repo) {
-          return new Response(JSON.stringify({ error: "GH_TOKEN or GH_REPO secret not configured." }), { 
-            status: 500, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
-        }
-
-        if (!path || !content) {
-          return new Response(JSON.stringify({ error: "Missing path or content payload." }), { 
-            status: 400, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
-        }
-
-        const headers = {
-          "User-Agent": "Cloudflare-Worker",
-          "Authorization": `Bearer ${githubToken}`,
-          "Accept": "application/vnd.github.v3+json",
-          "Content-Type": "application/json"
-        };
-
-        // 1. Check if the file already exists in the repo to obtain its SHA (required for overwrite)
-        let fileSha = null;
-        const getFileRes = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { headers });
-        if (getFileRes.ok) {
-          const fileData = await getFileRes.json();
-          fileSha = fileData.sha;
-        }
-
-        // 2. Inject the file content to GitHub 
-        const putBody = {
-          message: message || "Automated payload injection via UI proxy",
-          content: content,
-          branch: "main"
-        };
-        if (fileSha) putBody.sha = fileSha;
-
-        const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-          method: "PUT",
-          headers: headers,
-          body: JSON.stringify(putBody)
+        const response = await fetch(proxyUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                path: `inbox/${currentFileName}`,
+                content: base64Payload,
+                job: step.id,
+                layers: document.getElementById('layersInput').value
+            })
         });
 
-        if (!putRes.ok) {
-          const errText = await putRes.text();
-          return new Response(JSON.stringify({ error: "Failed to inject file to repository.", details: errText }), { 
-            status: putRes.status, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
+        // We aggressively parse the response regardless of the status code to catch smuggled errors
+        const responseText = await response.text();
+        let data = {};
+        try {
+            data = JSON.parse(responseText);
+        } catch (e) {
+            data = { raw: responseText };
         }
 
-        // 3. Dispatch the specific workflow job
-        const dispatchRes = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
-          method: "POST",
-          headers: headers,
-          body: JSON.stringify({
-            event_type: "pipeline_trigger",
-            client_payload: {
-              job: job || "segment",
-              layers: layers || "6",
-              file: path
+        if (response.ok && !data.error) {
+            pollInterval = setInterval(() => pollTelemetry(step), 5000);
+        } else {
+            // Unmask the smuggled error
+            log(`PROXY REJECTION [HTTP ${response.status}]:`, "error");
+            if (data.error) {
+                log(`Type: ${data.error}`, "error");
+                log(`Details: ${data.details || data.message || 'None'}`, "error");
+                if (data.stack) log(`Stack: ${data.stack}`, "error");
+            } else {
+                log(`Raw Body: ${data.raw}`, "error");
             }
-          })
-        });
-
-        return new Response(JSON.stringify({ success: true, message: "Payload delivered. GitHub Runner awoken." }), {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      }
-
-      // If neither GET nor POST
-      return new Response(JSON.stringify({ error: "Method Not Allowed" }), { 
-        status: 405, 
-        headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
-
+            terminalStatus.textContent = 'FAULT';
+        }
     } catch (error) {
-      return new Response(JSON.stringify({ error: "Internal Server Error", details: error.message }), { 
-        status: 500, 
-        headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
+        log(`FATAL NETWORK EXCEPTION:`, "error");
+        log(`Name: ${error.name}`, "error");
+        log(`Message: ${error.message}`, "error");
+        terminalStatus.textContent = 'OFFLINE';
     }
-  }
-};
+}
+
+async function pollTelemetry(step) {
+    try {
+        const response = await fetch(proxyUrl, { method: 'GET' });
+        if (!response.ok) return;
+        const data = await response.json();
+        
+        if (data.status === 'completed') {
+            clearInterval(pollInterval);
+            terminalStatus.textContent = "AWAITING APPROVAL";
+            terminalStatus.style.color = '#00ff00';
+            log(`${step.title} completed. Awaiting human consent.`, "info");
+            
+            if (step.id === 'segment') {
+                log("Final artifact paper_planes_layers.zip generated. Pipeline terminated.", "info");
+                return;
+            }
+
+            // Present approval UI
+            const outUrl = data.artifacts?.output || step.output;
+            document.getElementById('approval-title').textContent = step.title;
+            document.getElementById('approval-preview').src = outUrl;
+            document.getElementById('approval-ui').style.display = 'block';
+            
+            // Wire depth map into realigner proactively
+            if (step.id === 'depth') {
+                depthImg.onload = () => { hasDepth = true; drawCanvas(); };
+                depthImg.src = outUrl;
+            }
+        }
+    } catch (error) {
+        console.error("Polling error:", error);
+    }
+}
+
+document.getElementById('btn-approve').addEventListener('click', () => {
+    currentStepIdx++;
+    executeStep(currentStepIdx);
+});
+
+document.getElementById('btn-reject').addEventListener('click', () => {
+    log(`Human rejected artifact for ${WORKFLOW[currentStepIdx].title}. Halting.`, "error");
+    document.getElementById('approval-ui').style.display = 'none';
+    document.getElementById('init-container').style.display = 'block';
+});
+
+// --- REALIGNER MODULE ---
+const canvas = document.getElementById('canvas');
+const ctx = canvas ? canvas.getContext('2d') : null;
+let baseImg = new Image(), depthImg = new Image();
+let hasBase = false, hasDepth = false;
+
+const ui = ['x', 'y', 'scale', 'rot', 'op'].reduce((acc, id) => {
+    const el = document.getElementById(id);
+    if (el) {
+        acc[id] = el;
+        el.addEventListener('input', (e) => {
+            const valEl = document.getElementById(id + 'Val');
+            if (valEl) valEl.innerText = e.target.value;
+            drawCanvas();
+        });
+    }
+    return acc;
+}, {});
+
+const baseUpload = document.getElementById('baseUpload');
+const depthUpload = document.getElementById('depthUpload');
+
+if (baseUpload) baseUpload.onchange = e => loadImg(e, baseImg, () => hasBase = true);
+if (depthUpload) depthUpload.onchange = e => loadImg(e, depthImg, () => hasDepth = true);
+
+function loadImg(e, imgObj, callback) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = event => {
+        imgObj.onload = () => { callback(); drawCanvas(); };
+        imgObj.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function drawCanvas() {
+    if (!hasBase || !ctx) return;
+    
+    canvas.width = baseImg.width;
+    canvas.height = baseImg.height;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1.0;
+    ctx.drawImage(baseImg, 0, 0);
+
+    if (hasDepth) {
+        ctx.save();
+        ctx.globalAlpha = ui.op.value / 100;
+
+        const dx = parseInt(ui.x.value);
+        const dy = parseInt(ui.y.value);
+        const scale = parseInt(ui.scale.value) / 100;
+        const rot = parseInt(ui.rot.value) * Math.PI / 180;
+
+        ctx.translate(canvas.width / 2 + dx, canvas.height / 2 + dy);
+        ctx.rotate(rot);
+        ctx.scale(scale, scale);
+        ctx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
+        ctx.restore();
+    }
+}
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+    if (!hasBase || !hasDepth) return alert('Load both images first.');
+    
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = baseImg.width;
+    exportCanvas.height = baseImg.height;
+    const eCtx = exportCanvas.getContext('2d');
+    
+    eCtx.save();
+    const dx = parseInt(ui.x.value);
+    const dy = parseInt(ui.y.value);
+    const scale = parseInt(ui.scale.value) / 100;
+    const rot = parseInt(ui.rot.value) * Math.PI / 180;
+
+    eCtx.translate(exportCanvas.width / 2 + dx, exportCanvas.height / 2 + dy);
+    eCtx.rotate(rot);
+    eCtx.scale(scale, scale);
+    eCtx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
+    eCtx.restore();
+
+    const link = document.createElement('a');
+    link.download = 'realigned_depth_map.png';
+    link.href = exportCanvas.toDataURL('image/png');
+    link.click();
+    
+    log("Manual alignment complete. Returning to pipeline.", "info");
+    document.querySelector('[data-target="pipeline-tab"]').click();
+    currentStepIdx++;
+    executeStep(currentStepIdx);
+});
