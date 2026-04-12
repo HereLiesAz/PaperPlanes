@@ -42,6 +42,11 @@ let pollInterval = null;
 const proxyUrl = "https://paperplanes.hereliesaz.workers.dev/api"; 
 let base64Payload = null;
 let currentFileName = null;
+let isAwaitingManualWarp = false;
+
+// The Ledger of Reality. Prevents GitHub's slow API from tricking us into the past.
+let processedRuns = new Set();
+let activeRunTracker = null;
 
 document.getElementById('sourceInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -68,6 +73,8 @@ document.getElementById('processBtn').addEventListener('click', () => {
 async function executeStep(index, manualCoords = null) {
     const step = WORKFLOW[index];
     if (!step) return;
+
+    isAwaitingManualWarp = !!manualCoords;
 
     terminalStatus.textContent = `EXECUTING: ${step.id.toUpperCase()}`;
     terminalStatus.style.color = '#ffaa00';
@@ -124,17 +131,39 @@ async function pollTelemetry(step) {
         if (!response.ok) return;
         const data = await response.json();
         
+        if (data.run_id && data.run_id !== activeRunTracker && data.status !== 'completed') {
+            activeRunTracker = data.run_id;
+            log(`Runner synchronized. Tracking execution ID: ${activeRunTracker}`, "info");
+        }
+
         if (data.status === 'completed') {
+            // The Gatekeeper: Have we already processed this specific corpse?
+            if (data.run_id && processedRuns.has(data.run_id)) {
+                return; // Silently wait. The GitHub API hasn't registered the new dispatch yet.
+            }
+
+            if (data.run_id) processedRuns.add(data.run_id);
             clearInterval(pollInterval);
-            terminalStatus.textContent = "AWAITING APPROVAL";
-            terminalStatus.style.color = '#00ff00';
-            log(`${step.title} completed. Awaiting human consent.`, "info");
             
             if (step.id === 'segment') {
+                terminalStatus.textContent = "TERMINATED";
+                terminalStatus.style.color = '#00ff00';
                 log("Final artifact paper_planes_layers.zip generated. Pipeline terminated.", "info");
                 return;
             }
 
+            if (isAwaitingManualWarp) {
+                isAwaitingManualWarp = false;
+                log(`Manual vectors mathematically resolved by Python. Bypassing redundant approval.`, "info");
+                currentStepIdx++;
+                executeStep(currentStepIdx);
+                return;
+            }
+
+            terminalStatus.textContent = "AWAITING APPROVAL";
+            terminalStatus.style.color = '#00ff00';
+            log(`${step.title} completed. Awaiting human consent.`, "info");
+            
             const outUrl = data.artifacts?.output || step.output;
             document.getElementById('approval-title').textContent = step.title;
             document.getElementById('approval-preview').src = outUrl;
