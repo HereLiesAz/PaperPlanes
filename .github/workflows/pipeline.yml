@@ -30,6 +30,7 @@ jobs:
         env:
           TARGET_LAYERS: ${{ github.event.client_payload.layers || '6' }}
           MANUAL_COORDS: ${{ github.event.client_payload.coords || '' }}
+          CUSTOM_PROMPT: ${{ github.event.client_payload.prompt || '' }}
         run: |
           mkdir -p workspace
           python pipeline.py ${{ github.event.client_payload.job }}
