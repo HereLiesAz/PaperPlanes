@@ -1,0 +1,50 @@
+name: PaperPlanes Wizard Pipeline
+
+on:
+  repository_dispatch:
+    types: [pipeline_trigger]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  execute_step:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout reality
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch diffusers transformers accelerate pillow numpy opencv-python-headless rembg[cli]
+
+      - name: Execute Pipeline Job
+        env:
+          # This bridges the gap between the slider in your UI and the python script
+          TARGET_LAYERS: ${{ github.event.client_payload.layers || '6' }}
+        run: |
+          # Create workspace if it doesn't exist to prevent errors
+          mkdir -p workspace
+          
+          # Run the specific job requested by the Cloudflare Worker
+          python pipeline.py ${{ github.event.client_payload.job }}
+
+      - name: Commit and Push Artifacts
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Stage the workspace artifacts and final zip so the next step can use them
+          git add workspace/* || true
+          git add paper_planes_layers.zip || true
+          
+          git commit -m "Automated artifact generation for step: ${{ github.event.client_payload.job }}" || echo "No artifacts changed or generated."
+          git push
