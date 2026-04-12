@@ -159,7 +159,6 @@ def segment_layers():
     log("=== JOB 4: SEGMENT LAYERS ===")
     file_path = "workspace/cropped_image.png"
     
-    # We must assume the user passed the layer count via an environment variable or we default to 6.
     layers = int(os.getenv("TARGET_LAYERS", 6))
     log(f"Requested strata count parsed: {layers}")
 
