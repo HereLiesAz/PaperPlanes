@@ -1,27 +1,14 @@
-/**
- * @fileoverview Application logic for PaperPlanes.
- * Manages the sequential paper theater pipeline and state transitions.
- */
-
 const show = (id) => document.getElementById(id).style.display = 'block';
 const hide = (id) => document.getElementById(id).style.display = 'none';
 
-/**
- * Handle Splash Screen Fade
- */
 window.addEventListener('DOMContentLoaded', () => {
     const splash = document.getElementById('splash');
     setTimeout(() => {
         splash.style.opacity = '0';
-        setTimeout(() => {
-            splash.style.visibility = 'hidden';
-        }, 1200);
-    }, 2000);
+        setTimeout(() => { splash.style.visibility = 'hidden'; }, 1000);
+    }, 1500);
 });
 
-/**
- * Tab Navigation Logic
- */
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.onclick = () => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -31,20 +18,14 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     };
 });
 
-/**
- * Terminal HUD Logic
- */
 const terminal = document.getElementById('terminal');
 const log = (msg) => {
     const line = document.createElement('div');
-    line.innerHTML = `<span style="color:#444">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+    line.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}`;
     terminal.appendChild(line);
     terminal.scrollTop = terminal.scrollHeight;
 };
 
-/**
- * Workflow Definition
- */
 const WORKFLOW = [
     { id: 'crop', key: 'output' },
     { id: 'generate', key: 'photo' },
@@ -58,38 +39,26 @@ let base64 = null;
 let fileName = null;
 const proxy = "https://paperplanes.hereliesaz.workers.dev/api";
 
-/**
- * Handle Source File Input
- */
 document.getElementById('sourceInput').onchange = (e) => {
     if (!e.target.files[0]) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
         base64 = ev.target.result.split(',')[1];
         fileName = e.target.files[0].name;
-        log(`Source Manifested: ${fileName}`);
+        log(`Loaded: ${fileName}`);
     };
     reader.readAsDataURL(e.target.files[0]);
 };
 
-/**
- * Initial Trigger
- */
 document.getElementById('processBtn').onclick = () => {
-    if (!base64) return alert("Select image to deconstruct.");
+    if (!base64) return alert("Select file.");
     hide('init-ui');
     execute(0);
 };
 
-/**
- * Pipeline Execution and Polling
- * @param {number} idx - Step index
- * @param {string} coords - Manual warp coordinates
- * @param {string} prompt - Manual semantic override
- */
 async function execute(idx, coords = "", prompt = "") {
     const step = WORKFLOW[idx];
-    log(`Deconstructing: ${step.id.toUpperCase()}`);
+    log(`Running: ${step.id.toUpperCase()}`);
     hide('approval-ui'); hide('manual-crop-ui'); hide('manual-prompt-ui');
 
     try {
@@ -111,32 +80,28 @@ async function execute(idx, coords = "", prompt = "") {
             
             if (res.status === 'completed') {
                 clearInterval(poller);
-                if (step.id === 'segment') return log("Theater deconstruction complete.");
+                if (step.id === 'segment') return log("Complete.");
                 if (coords || prompt) return execute(idx + 1);
                 
-                // Cache busting via timestamp is critical to bypass CDN ghosts
+                // Cache busting prevents old images from showing
                 document.getElementById('approval-preview').src = `${res.artifacts[step.key]}?t=${Date.now()}`;
                 show('approval-ui');
             } else if (res.status === 'failed') {
                 clearInterval(poller);
-                log(`CRITICAL: ${step.id} collapsed into the void.`, 'error');
+                log(`Error in ${step.id}`);
             }
         }, 4000);
     } catch (err) {
-        log(`Dissonance: ${err.message}`);
+        log(`Network error: ${err.message}`);
     }
 }
 
-/**
- * Human Intervention Hooks
- */
 document.getElementById('btn-approve').onclick = () => {
     currentIdx++;
     execute(currentIdx);
 };
 
 document.getElementById('btn-reject').onclick = () => {
-    log("Rejecting machine manifestation. Requesting human alignment.");
     if (currentIdx === 0) show('manual-crop-ui');
     else if (currentIdx === 1) show('manual-prompt-ui');
 };
