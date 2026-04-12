@@ -10,7 +10,6 @@ import time
 from PIL import Image
 
 def log(msg):
-    # Standardize timestamped logging for the Actions console
     t = time.strftime("%H:%M:%S")
     print(f"[{t}] {msg}", flush=True)
 
@@ -21,10 +20,18 @@ def get_input_file():
     log(f"Selected target: {target}")
     return target
 
-def remove_background():
-    log("=== JOB 1: REMOVE BACKGROUND ===")
-    from rembg import remove
-    
+def order_points(pts):
+    rect = np.zeros((4, 2), dtype="float32")
+    s = pts.sum(axis=1)
+    rect[0] = pts[np.argmin(s)]
+    rect[2] = pts[np.argmax(s)]
+    diff = np.diff(pts, axis=1)
+    rect[1] = pts[np.argmin(diff)]
+    rect[3] = pts[np.argmax(diff)]
+    return rect
+
+def perspective_crop():
+    log("=== JOB 1: PERSPECTIVE & CROP ===")
     os.makedirs("workspace", exist_ok=True)
     file_path = get_input_file()
     
@@ -32,41 +39,79 @@ def remove_background():
         log("FATAL: No valid image found in inbox.")
         sys.exit(1)
         
-    log(f"Opening original image: {file_path}")
-    image = Image.open(file_path).convert("RGB")
-    log(f"Original image size: {image.size}")
+    image = cv2.imread(file_path)
+    orig = image.copy()
     
-    log("Executing rembg on CPU...")
-    start_time = time.time()
-    image_nobg = remove(image)
-    log(f"rembg completed in {time.time() - start_time:.2f} seconds.")
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    edged = cv2.Canny(gray, 75, 200)
     
-    mask = np.array(image_nobg)[:, :, 3]
-    active_pixels = np.count_nonzero(mask)
-    total_pixels = mask.size
-    log(f"Mask generated. Active pixels: {active_pixels} / {total_pixels} ({(active_pixels/total_pixels)*100:.2f}%)")
+    cnts, _ = cv2.findContours(edged.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
     
-    Image.fromarray(mask).save("workspace/subject_mask.png")
-    log("Subject mask saved to workspace/subject_mask.png")
+    screenCnt = None
+    for c in cnts:
+        peri = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+        if len(approx) == 4:
+            screenCnt = approx
+            break
+            
+    if screenCnt is not None:
+        log("Painting boundaries detected. Warping perspective to face straight on and amputating periphery.")
+        pts = screenCnt.reshape(4, 2)
+        rect = order_points(pts)
+        (tl, tr, br, bl) = rect
+        
+        widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+        widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+        maxWidth = max(int(widthA), int(widthB))
+        
+        heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+        heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+        maxHeight = max(int(heightA), int(heightB))
+        
+        dst = np.array([
+            [0, 0],
+            [maxWidth - 1, 0],
+            [maxWidth - 1, maxHeight - 1],
+            [0, maxHeight - 1]], dtype="float32")
+            
+        M = cv2.getPerspectiveTransform(rect, dst)
+        warped = cv2.warpPerspective(orig, M, (maxWidth, maxHeight))
+        
+        cv2.imwrite("workspace/cropped_image.png", warped)
+        log("Cropped and warped image saved to workspace/cropped_image.png")
+    else:
+        log("No definitive 4-point boundaries found. Reality is too messy. Preserving original bounds.")
+        cv2.imwrite("workspace/cropped_image.png", orig)
 
 def generate_image():
     log("=== JOB 2: GENERATE HALLUCINATION ===")
     import torch
     from diffusers import StableDiffusionImg2ImgPipeline
     
-    os.makedirs("workspace", exist_ok=True)
-    file_path = get_input_file()
-    
-    log(f"Loading initial image: {file_path}")
+    file_path = "workspace/cropped_image.png"
+    if not os.path.exists(file_path):
+        log("FATAL: cropped_image.png not found. Run perspective_crop first.")
+        sys.exit(1)
+        
+    log(f"Loading cropped image: {file_path}")
     init_image = Image.open(file_path).convert("RGB")
     
-    log("Loading Stable Diffusion Pipeline (runwayml/stable-diffusion-v1-5)...")
+    log("Loading Nano Banana 2...")
     start_time = time.time()
-    pipe = StableDiffusionImg2ImgPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", torch_dtype=torch.float32)
+    
+    try:
+        pipe = StableDiffusionImg2ImgPipeline.from_pretrained("nano-banana-2", torch_dtype=torch.float32)
+    except Exception:
+        log("Nano Banana 2 slipped on a peel. Defaulting to SD 2.1 to outsmart reality.")
+        pipe = StableDiffusionImg2ImgPipeline.from_pretrained("stabilityai/stable-diffusion-2-1", torch_dtype=torch.float32)
+        
     pipe.safety_checker = None
     log(f"Pipeline loaded in {time.time() - start_time:.2f} seconds.")
     
-    prompt = "A high fidelity 3D render, volumetric depth, clear geometry, structural, high contrast"
+    prompt = "Turn this painting into a photograph"
     log(f"Executing generation with prompt: '{prompt}'")
     log("Strength: 0.65, Guidance: 7.5")
     
@@ -77,68 +122,11 @@ def generate_image():
     generated.save("workspace/generated_image.png")
     log("Hallucination saved to workspace/generated_image.png")
 
-def align_images():
-    log("=== JOB 3: ALIGN IMAGES ===")
-    os.makedirs("workspace", exist_ok=True)
-    file_path = get_input_file()
-    
-    log("Reading source and generated images into OpenCV...")
-    source_cv = cv2.imread(file_path)
-    gen_cv = cv2.imread("workspace/generated_image.png")
-    
-    log(f"Source shape: {source_cv.shape}, Generated shape (before resize): {gen_cv.shape}")
-    gen_cv = cv2.resize(gen_cv, (source_cv.shape[1], source_cv.shape[0]))
-    log(f"Generated image resized to: {gen_cv.shape}")
-    
-    gray_src = cv2.cvtColor(source_cv, cv2.COLOR_BGR2GRAY)
-    gray_tgt = cv2.cvtColor(gen_cv, cv2.COLOR_BGR2GRAY)
-
-    log("Initializing ORB Feature Detector (Max 5000 features)...")
-    orb = cv2.ORB_create(MAX_FEATURES=5000)
-    kp_src, des_src = orb.detectAndCompute(gray_src, None)
-    kp_tgt, des_tgt = orb.detectAndCompute(gray_tgt, None)
-    
-    log(f"Features detected - Source: {len(kp_src)}, Generated: {len(kp_tgt)}")
-
-    if des_src is None or des_tgt is None:
-        log("WARNING: Failed to detect features in one or both images. Falling back to unaligned.")
-        cv2.imwrite("workspace/aligned_image.png", gen_cv)
-        return
-
-    log("Matching features using BFMatcher (Hamming)...")
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-    matches = bf.knnMatch(des_src, des_tgt, k=2)
-
-    log(f"Total raw matches found: {len(matches)}")
-    good_matches = [m for m, n in matches if m.distance < 0.75 * n.distance]
-    log(f"Good matches after Lowe's ratio test: {len(good_matches)}")
-
-    if len(good_matches) > 10:
-        log("Calculating Homography matrix...")
-        src_pts = np.float32([kp_src[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-        tgt_pts = np.float32([kp_tgt[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-        matrix, mask = cv2.findHomography(tgt_pts, src_pts, cv2.RANSAC, 5.0)
-        
-        if matrix is not None:
-            log(f"Homography matrix computed successfully. Inliers: {np.sum(mask)} / {len(good_matches)}")
-            aligned = cv2.warpPerspective(gen_cv, matrix, (source_cv.shape[1], source_cv.shape[0]))
-            log("Perspective warp applied.")
-        else:
-            log("WARNING: Homography matrix calculation failed (returned None). Falling back to unaligned.")
-            aligned = gen_cv
-    else:
-        log("WARNING: Insufficient good matches (< 10). Homography aborted. Falling back to unaligned.")
-        aligned = gen_cv
-
-    cv2.imwrite("workspace/aligned_image.png", aligned)
-    log("Aligned image saved to workspace/aligned_image.png")
-
 def extract_depth():
-    log("=== JOB 4: EXTRACT DEPTH ===")
+    log("=== JOB 3: EXTRACT DEPTH ===")
     import torch
     from transformers import pipeline
     
-    os.makedirs("workspace", exist_ok=True)
     device = 0 if torch.cuda.is_available() else -1
     log(f"Device selected for depth extraction: {'CUDA (0)' if device == 0 else 'CPU (-1)'}")
     
@@ -147,52 +135,59 @@ def extract_depth():
     depth_pipe = pipeline("depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf", device=device)
     log(f"Depth pipeline loaded in {time.time() - start_time:.2f} seconds.")
     
-    log("Loading aligned generated image...")
-    aligned_pil = Image.open("workspace/aligned_image.png").convert("RGB")
+    log("Loading unaligned generated image...")
+    generated_pil = Image.open("workspace/generated_image.png").convert("RGB")
     
     log("Executing depth inference...")
     inf_start = time.time()
-    depth_result = depth_pipe(aligned_pil)
+    depth_result = depth_pipe(generated_pil)
     log(f"Depth inference completed in {time.time() - inf_start:.2f} seconds.")
     
     depth_array = np.array(depth_result["depth"]).astype(np.float32)
     log(f"Raw Depth Array - Shape: {depth_array.shape}, Min: {depth_array.min():.4f}, Max: {depth_array.max():.4f}, Mean: {depth_array.mean():.4f}")
     
-    np.save("workspace/depth_map.npy", depth_array)
-    log("Raw depth map saved to workspace/depth_map.npy")
+    depth_min, depth_max = depth_array.min(), depth_array.max()
+    if depth_min != depth_max:
+        normalized_depth = ((depth_array - depth_min) / (depth_max - depth_min) * 255).astype(np.uint8)
+    else:
+        normalized_depth = np.zeros_like(depth_array, dtype=np.uint8)
+
+    Image.fromarray(normalized_depth).save("workspace/raw_depth_map.png")
+    log("Visual depth map saved to workspace/raw_depth_map.png for manual realignment.")
 
 def segment_layers():
-    log("=== JOB 5: SEGMENT LAYERS ===")
-    file_path = get_input_file()
+    log("=== JOB 4: SEGMENT LAYERS ===")
+    file_path = "workspace/cropped_image.png"
     
-    match = re.search(r'_layers-(\d+)\.', file_path)
-    layers = int(match.group(1)) if match else 6
+    # We must assume the user passed the layer count via an environment variable or we default to 6.
+    layers = int(os.getenv("TARGET_LAYERS", 6))
     log(f"Requested strata count parsed: {layers}")
 
     log("Loading arrays into memory...")
     source_array = np.array(Image.open(file_path).convert("RGB"))
-    mask_array = np.array(Image.open("workspace/subject_mask.png")) > 0
-    depth_array = np.load("workspace/depth_map.npy")
     
-    log(f"Source Array: {source_array.shape}, Mask Array: {mask_array.shape}, Depth Array: {depth_array.shape}")
-
-    subject_depth = depth_array[mask_array]
-    log(f"Pixels in subject mask: {len(subject_depth)}")
+    depth_path = "workspace/realigned_depth_map.png"
+    if not os.path.exists(depth_path):
+        log(f"FATAL Error: {depth_path} not found. You are required to align raw_depth_map.png manually via the UI first.")
+        sys.exit(1)
+        
+    depth_array = np.array(Image.open(depth_path).convert("L")).astype(np.float32)
     
-    if len(subject_depth) == 0:
-        log("FATAL Error: Subject mask is completely empty. Cannot normalize depth.")
-        return
+    log(f"Source Array: {source_array.shape}, Depth Array: {depth_array.shape}")
 
-    min_depth, max_depth = subject_depth.min(), subject_depth.max()
-    log(f"Pre-Normalization - Subject Min Depth: {min_depth:.4f}, Max Depth: {max_depth:.4f}")
+    if depth_array.shape[:2] != source_array.shape[:2]:
+        log("WARNING: Realigned depth map dimensions do not match source. Forcing resize.")
+        depth_array = cv2.resize(depth_array, (source_array.shape[1], source_array.shape[0]), interpolation=cv2.INTER_LINEAR)
+
+    min_depth, max_depth = depth_array.min(), depth_array.max()
+    log(f"Pre-Normalization - Min Depth: {min_depth:.4f}, Max Depth: {max_depth:.4f}")
     
     if min_depth == max_depth:
-        log("WARNING: Subject depth is entirely flat. Min == Max. Normalization will fail gracefully.")
+        log("WARNING: Depth is entirely flat. Min == Max. Normalization will fail gracefully.")
         normalized_depth = np.zeros_like(depth_array)
     else:
-        normalized_depth = np.zeros_like(depth_array)
-        normalized_depth[mask_array] = np.interp(depth_array[mask_array], (min_depth, max_depth), (0, 255))
-        log("Depth normalized to 0-255 scale within subject boundaries.")
+        normalized_depth = np.interp(depth_array, (min_depth, max_depth), (0, 255))
+        log("Depth normalized to 0-255 scale.")
 
     bins = np.linspace(0, 255.1, layers + 1)
     log(f"Calculated depth bins: {bins}")
@@ -200,7 +195,7 @@ def segment_layers():
     log("Opening zipfile for packaging...")
     with zipfile.ZipFile("paper_planes_layers.zip", "w", zipfile.ZIP_DEFLATED) as zip_file:
         for i in range(layers):
-            layer_mask = (normalized_depth >= bins[i]) & (normalized_depth < bins[i+1]) & mask_array
+            layer_mask = (normalized_depth >= bins[i]) & (normalized_depth < bins[i+1])
             active_pixels = np.count_nonzero(layer_mask)
             
             log(f"Layer {i:03d} - Active pixels: {active_pixels}")
@@ -227,10 +222,9 @@ if __name__ == "__main__":
         sys.exit(1)
         
     job = sys.argv[1]
-    if job == "remove_bg": remove_background()
+    if job == "crop": perspective_crop()
     elif job == "generate": generate_image()
-    elif job == "align": align_images()
     elif job == "depth": extract_depth()
     elif job == "segment": segment_layers()
     else:
-        print(f"Unknown job: {job}")
+        print(f"Unknown job: {job}. I only respond to 'crop', 'generate', 'depth', or 'segment'.")
