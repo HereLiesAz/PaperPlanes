@@ -4,8 +4,8 @@
   "description": "Sequential deconstruction of paintings into 3D stratified paper theater layers.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#121212",
-  "theme_color": "#007bff",
+  "background_color": "#0a0a0a",
+  "theme_color": "#000000",
   "icons": [
     {
       "src": "paper_planes_icon.png",
@@ -49,28 +49,8 @@
       "type": "image/png"
     },
     {
-      "src": "ios/20.png",
-      "sizes": "20x20",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/29.png",
-      "sizes": "29x29",
-      "type": "image/png"
-    },
-    {
       "src": "ios/32.png",
       "sizes": "32x32",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/40.png",
-      "sizes": "40x40",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/50.png",
-      "sizes": "50x50",
       "type": "image/png"
     },
     {
@@ -79,48 +59,8 @@
       "type": "image/png"
     },
     {
-      "src": "ios/58.png",
-      "sizes": "58x58",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/60.png",
-      "sizes": "60x60",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/64.png",
-      "sizes": "64x64",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/72.png",
-      "sizes": "72x72",
-      "type": "image/png"
-    },
-    {
       "src": "ios/76.png",
       "sizes": "76x76",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/80.png",
-      "sizes": "80x80",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/87.png",
-      "sizes": "87x87",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/100.png",
-      "sizes": "100x100",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/114.png",
-      "sizes": "114x114",
       "type": "image/png"
     },
     {
@@ -129,23 +69,8 @@
       "type": "image/png"
     },
     {
-      "src": "ios/128.png",
-      "sizes": "128x128",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/144.png",
-      "sizes": "144x144",
-      "type": "image/png"
-    },
-    {
       "src": "ios/152.png",
       "sizes": "152x152",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/167.png",
-      "sizes": "167x167",
       "type": "image/png"
     },
     {
@@ -156,16 +81,6 @@
     {
       "src": "ios/192.png",
       "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/256.png",
-      "sizes": "256x256",
-      "type": "image/png"
-    },
-    {
-      "src": "ios/512.png",
-      "sizes": "512x512",
       "type": "image/png"
     },
     {
@@ -184,11 +99,6 @@
       "type": "image/png"
     },
     {
-      "src": "windows/Wide310x150Logo.scale-100.png",
-      "sizes": "310x150",
-      "type": "image/png"
-    },
-    {
       "src": "windows/StoreLogo.scale-100.png",
       "sizes": "50x50",
       "type": "image/png"
@@ -196,16 +106,6 @@
     {
       "src": "windows/SplashScreen.scale-100.png",
       "sizes": "620x300",
-      "type": "image/png"
-    },
-    {
-      "src": "windows/SmallTile.scale-100.png",
-      "sizes": "71x71",
-      "type": "image/png"
-    },
-    {
-      "src": "windows/LargeTile.scale-100.png",
-      "sizes": "310x310",
       "type": "image/png"
     }
   ]
