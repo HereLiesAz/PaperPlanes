@@ -32,7 +32,14 @@ export default {
         const binaryString = atob(data.content.replace(/\n/g, ""));
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-        return new Response(bytes, { headers: { ...corsHeaders, "Content-Type": "image/png" } });
+        
+        return new Response(bytes, { 
+          headers: { 
+            ...corsHeaders, 
+            "Content-Type": "image/png",
+            "Cache-Control": "no-cache, no-store, must-revalidate"
+          } 
+        });
       }
 
       // --- POLLING ---
@@ -49,6 +56,7 @@ export default {
         if (!latestRun) return new Response(JSON.stringify({ status: "idle" }), { headers: corsHeaders });
 
         const baseUrl = url.origin + url.pathname;
+        // Injecting run_id so the frontend can differentiate between executions
         return new Response(JSON.stringify({
           run_id: latestRun.id,
           status: latestRun.status,
@@ -71,7 +79,6 @@ export default {
           "Content-Type": "application/json"
         };
 
-        // Get file SHA for update
         let fileSha = null;
         const getFile = await fetch(`https://api.github.com/repos/${repo}/contents/${body.path}`, { headers });
         if (getFile.ok) {
@@ -79,7 +86,6 @@ export default {
           fileSha = fileData.sha;
         }
 
-        // Upload
         const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/${body.path}`, {
           method: "PUT",
           headers: headers,
@@ -93,7 +99,6 @@ export default {
 
         if (!putRes.ok) return new Response(await putRes.text(), { status: 418, headers: corsHeaders });
 
-        // Dispatch
         await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
           method: "POST",
           headers: headers,
