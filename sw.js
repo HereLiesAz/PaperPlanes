@@ -1,4 +1,4 @@
-const CACHE_NAME = 'paper-planes-v6';
+const CACHE_NAME = 'paper-planes-v7';
 const ASSETS = [
     './',
     './index.html',
