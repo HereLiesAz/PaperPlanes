@@ -54,14 +54,18 @@ export default {
         const jobsRes = await fetch(latestRun.jobs_url, { headers });
         const jobsData = jobsRes.ok ? await jobsRes.json() : { jobs: [] };
 
+        // Construct absolute URLs to GitHub's raw CDN, bypassing the cache with the run's update timestamp
+        const rawBase = `https://raw.githubusercontent.com/${repo}/main`;
+        const cacheBuster = `?t=${new Date(latestRun.updated_at).getTime() || Date.now()}`;
+
         const payload = {
           status: latestRun.status,
           conclusion: latestRun.conclusion,
           jobs: jobsData.jobs || [],
           artifacts: {
-            output: `/workspace/cropped_image.png`, 
-            photo: `/workspace/generated_image.png`,
-            depth: `/workspace/raw_depth_map.png`
+            output: `${rawBase}/workspace/cropped_image.png${cacheBuster}`, 
+            photo: `${rawBase}/workspace/generated_image.png${cacheBuster}`,
+            depth: `${rawBase}/workspace/raw_depth_map.png${cacheBuster}`
           }
         };
 
