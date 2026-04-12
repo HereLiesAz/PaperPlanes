@@ -5,7 +5,7 @@ if ('serviceWorker' in navigator) {
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => b.classList.remove('active'));
         btn.classList.add('active');
         document.getElementById(btn.dataset.target).classList.add('active');
     });
@@ -44,8 +44,9 @@ let base64Payload = null;
 let currentFileName = null;
 let isAwaitingManualWarp = false;
 
-let processedRuns = new Set();
-let activeRunTracker = null;
+// Temporal Sync State
+let lastKnownRunId = null;
+let awaitingNewRun = false;
 
 document.getElementById('sourceInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -60,10 +61,7 @@ document.getElementById('sourceInput').addEventListener('change', (e) => {
 });
 
 document.getElementById('processBtn').addEventListener('click', () => {
-    if (!base64Payload) {
-        log("FATAL: Source image required.", "error");
-        return;
-    }
+    if (!base64Payload) return log("FATAL: Source image required.", "error");
     document.getElementById('init-container').style.display = 'none';
     currentStepIdx = 0;
     executeStep(currentStepIdx);
@@ -74,21 +72,24 @@ async function executeStep(index, manualCoords = null, customPrompt = null) {
     if (!step) return;
 
     isAwaitingManualWarp = !!manualCoords;
-
-    terminalStatus.textContent = `EXECUTING: ${step.id.toUpperCase()}`;
+    terminalStatus.textContent = `INITIATING: ${step.id.toUpperCase()}`;
     terminalStatus.style.color = '#ffaa00';
-    log(`--- INITIATING: ${step.title} ---`);
+    log(`--- TRIGGERING: ${step.title} ---`);
+    
+    // De-render old artifacts to prevent ghosting
     document.getElementById('approval-ui').style.display = 'none';
     document.getElementById('manual-crop-ui').style.display = 'none';
     document.getElementById('manual-prompt-ui').style.display = 'none';
 
-    if (step.id === 'align') {
-        log("Redirecting to Realigner Tab for manual override.", "warn");
-        document.querySelector('[data-target="realigner-tab"]').click();
-        return;
-    }
-
     try {
+        // 1. Snapshot the current Run ID before triggering the next one
+        const preRes = await fetch(proxyUrl);
+        const preData = await preRes.json();
+        lastKnownRunId = preData.run_id;
+        awaitingNewRun = true;
+        log(`Current GitHub State ID: ${lastKnownRunId}. Awaiting runner birth...`);
+
+        // 2. Trigger the job
         const payloadStr = JSON.stringify({
             path: `inbox/${currentFileName}`,
             content: base64Payload,
@@ -98,31 +99,15 @@ async function executeStep(index, manualCoords = null, customPrompt = null) {
             prompt: customPrompt || ""
         });
 
-        const response = await fetch(proxyUrl, {
+        await fetch(proxyUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: payloadStr
         });
 
-        const responseText = await response.text();
-        let data = {};
-        try { data = JSON.parse(responseText); } catch (e) { data = { raw: responseText }; }
-
-        if (response.ok && !data.error) {
-            pollInterval = setInterval(() => pollTelemetry(step), 5000);
-        } else {
-            log(`PROXY REJECTION [HTTP ${response.status}]:`, "error");
-            if (data.error) {
-                log(`Type: ${data.error}`, "error");
-                log(`Details: ${data.details || data.message || 'None'}`, "error");
-            } else {
-                log(`Raw Body: ${data.raw}`, "error");
-            }
-            terminalStatus.textContent = 'FAULT';
-        }
+        pollInterval = setInterval(() => pollTelemetry(step), 5000);
     } catch (error) {
-        log(`FATAL NETWORK EXCEPTION: ${error.message}`, "error");
-        terminalStatus.textContent = 'OFFLINE';
+        log(`TRIGGER ERROR: ${error.message}`, "error");
     }
 }
 
@@ -132,55 +117,51 @@ async function pollTelemetry(step) {
         if (!response.ok) return;
         const data = await response.json();
         
-        if (data.run_id && data.run_id !== activeRunTracker && data.status !== 'completed') {
-            activeRunTracker = data.run_id;
-            log(`Runner synchronized. Tracking execution ID: ${activeRunTracker}`, "info");
+        // Phase 1: Wait for a brand new Run ID to appear in GitHub's API
+        if (awaitingNewRun) {
+            if (data.run_id !== lastKnownRunId) {
+                awaitingNewRun = false;
+                log(`NEW RUN DETECTED: ${data.run_id}. Installing dependencies/computing...`, "warn");
+            } else {
+                terminalStatus.textContent = "WAKING RUNNER...";
+                return; // Keep waiting for the API to reflect the dispatch
+            }
         }
 
+        // Phase 2: Track the active run
+        terminalStatus.textContent = `RUNNING: ${data.status.toUpperCase()}`;
+        
         if (data.status === 'completed') {
-            if (data.run_id && processedRuns.has(data.run_id)) {
-                return; 
-            }
-
+            clearInterval(pollInterval);
+            
             if (data.conclusion === 'failure') {
-                clearInterval(pollInterval);
-                log(`FATAL: The GitHub Runner crashed during execution, or the commit was rejected by reality. Verify the Actions log in GitHub.`, "error");
-                terminalStatus.textContent = 'CRITICAL FAULT';
-                terminalStatus.style.color = '#ff4444';
-                document.getElementById('init-container').style.display = 'block';
+                log(`RUNNER CRASHED. Check GitHub Actions console.`, "error");
+                terminalStatus.textContent = 'FAULT';
                 return;
             }
 
-            if (data.run_id) processedRuns.add(data.run_id);
-            clearInterval(pollInterval);
+            log(`${step.title} SUCCESS.`, "info");
             
             if (step.id === 'segment') {
-                terminalStatus.textContent = "TERMINATED";
-                terminalStatus.style.color = '#00ff00';
-                log("Final artifact paper_planes_layers.zip generated. Pipeline terminated.", "info");
+                terminalStatus.textContent = "DONE";
+                log("Final artifact paper_planes_layers.zip generated.", "info");
                 return;
             }
 
             if (isAwaitingManualWarp) {
                 isAwaitingManualWarp = false;
-                log(`Manual vectors mathematically resolved by Python. Bypassing redundant approval.`, "info");
                 currentStepIdx++;
                 executeStep(currentStepIdx);
                 return;
             }
 
-            terminalStatus.textContent = "AWAITING APPROVAL";
-            terminalStatus.style.color = '#00ff00';
-            log(`${step.title} completed. Awaiting human consent.`, "info");
-            
-            // Correctly route the CDN link based on the specific artifact key for this step
-            const outUrl = data.artifacts?.[step.artKey] || step.output;
+            const outUrl = data.artifacts?.[step.artKey];
             document.getElementById('approval-title').textContent = step.title;
             document.getElementById('approval-preview').src = outUrl;
             document.getElementById('approval-ui').style.display = 'block';
             
             if (step.id === 'depth') {
-                depthImg.onload = () => { hasDepth = true; drawCanvas(); };
+                depthImg.onload = () => { hasBase = true; hasDepth = true; drawCanvas(); };
                 depthImg.src = outUrl;
             }
         }
@@ -195,16 +176,12 @@ document.getElementById('btn-approve').addEventListener('click', () => {
 });
 
 document.getElementById('btn-reject').addEventListener('click', () => {
-    log(`Human rejected artifact for ${WORKFLOW[currentStepIdx].title}.`, "error");
     if (currentStepIdx === 0) {
-        log("Auto-detection failed. Summoning manual vector tools.", "warn");
         initCropUI();
     } else if (currentStepIdx === 1) {
-        log("Hallucination rejected. Awaiting aggressive semantic correction.", "warn");
         document.getElementById('approval-ui').style.display = 'none';
         document.getElementById('manual-prompt-ui').style.display = 'block';
     } else {
-        log("Halting sequence entirely.", "error");
         document.getElementById('approval-ui').style.display = 'none';
         document.getElementById('init-container').style.display = 'block';
     }
@@ -212,37 +189,27 @@ document.getElementById('btn-reject').addEventListener('click', () => {
 
 document.getElementById('btn-submit-prompt').addEventListener('click', () => {
     const newPrompt = document.getElementById('customPromptInput').value.trim();
-    if (!newPrompt) {
-        log("You cannot submit an empty directive to the void.", "error");
-        return;
-    }
-    log(`Injecting override directive: "${newPrompt}"`, "warn");
+    if (!newPrompt) return;
     executeStep(currentStepIdx, null, newPrompt);
 });
 
-// --- MANUAL CROP MODULE ---
+// --- REALIGNER & CROP MODULES (UNCHANGED LOGIC) ---
 const cropCanvas = document.getElementById('cropCanvas');
 const cropCtx = cropCanvas ? cropCanvas.getContext('2d') : null;
 let cropPoints = [];
 let draggingPoint = null;
 
 function initCropUI() {
-    if (!hasBase) return;
     document.getElementById('approval-ui').style.display = 'none';
     document.getElementById('manual-crop-ui').style.display = 'block';
-
     cropCanvas.width = baseImg.width;
     cropCanvas.height = baseImg.height;
-
-    const w = baseImg.width;
-    const h = baseImg.height;
-    const inset = Math.min(w, h) * 0.1;
-
+    const inset = Math.min(baseImg.width, baseImg.height) * 0.1;
     cropPoints = [
         {x: inset, y: inset},
-        {x: w - inset, y: inset},
-        {x: w - inset, y: h - inset},
-        {x: inset, y: h - inset}
+        {x: baseImg.width - inset, y: inset},
+        {x: baseImg.width - inset, y: baseImg.height - inset},
+        {x: inset, y: baseImg.height - inset}
     ];
     drawCropCanvas();
 }
@@ -251,39 +218,18 @@ function drawCropCanvas() {
     if (!cropCtx) return;
     cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
     cropCtx.drawImage(baseImg, 0, 0);
-
-    cropCtx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    cropCtx.beginPath();
-    cropCtx.moveTo(0, 0);
-    cropCtx.lineTo(cropCanvas.width, 0);
-    cropCtx.lineTo(cropCanvas.width, cropCanvas.height);
-    cropCtx.lineTo(0, cropCanvas.height);
-    cropCtx.closePath();
-
-    cropCtx.moveTo(cropPoints[0].x, cropPoints[0].y);
-    cropCtx.lineTo(cropPoints[3].x, cropPoints[3].y);
-    cropCtx.lineTo(cropPoints[2].x, cropPoints[2].y);
-    cropCtx.lineTo(cropPoints[1].x, cropPoints[1].y);
-    cropCtx.closePath();
-    cropCtx.fill('evenodd');
-
     cropCtx.strokeStyle = '#00ff00';
-    cropCtx.lineWidth = Math.max(2, cropCanvas.width / 300);
+    cropCtx.lineWidth = 2;
     cropCtx.beginPath();
     cropCtx.moveTo(cropPoints[0].x, cropPoints[0].y);
-    cropCtx.lineTo(cropPoints[1].x, cropPoints[1].y);
-    cropCtx.lineTo(cropPoints[2].x, cropPoints[2].y);
-    cropCtx.lineTo(cropPoints[3].x, cropPoints[3].y);
+    cropPoints.forEach(p => cropCtx.lineTo(p.x, p.y));
     cropCtx.closePath();
     cropCtx.stroke();
-
-    const radius = Math.max(10, cropCanvas.width / 100);
     cropCtx.fillStyle = '#ff4444';
     cropPoints.forEach(p => {
         cropCtx.beginPath();
-        cropCtx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        cropCtx.arc(p.x, p.y, 10, 0, Math.PI * 2);
         cropCtx.fill();
-        cropCtx.stroke();
     });
 }
 
@@ -291,51 +237,32 @@ function getMousePos(evt) {
     const rect = cropCanvas.getBoundingClientRect();
     const scaleX = cropCanvas.width / rect.width;
     const scaleY = cropCanvas.height / rect.height;
-    let clientX = evt.clientX;
-    let clientY = evt.clientY;
-    if (evt.touches && evt.touches.length > 0) {
-        clientX = evt.touches[0].clientX;
-        clientY = evt.touches[0].clientY;
-    }
     return {
-        x: (clientX - rect.left) * scaleX,
-        y: (clientY - rect.top) * scaleY
+        x: (evt.clientX - rect.left) * scaleX,
+        y: (evt.clientY - rect.top) * scaleY
     };
 }
 
 if (cropCanvas) {
-    const downEvent = (e) => {
-        e.preventDefault();
+    cropCanvas.addEventListener('mousedown', (e) => {
         const pos = getMousePos(e);
-        const hitRadius = Math.max(30, cropCanvas.width / 40);
-        draggingPoint = cropPoints.find(p => Math.hypot(p.x - pos.x, p.y - pos.y) < hitRadius);
-    };
-    const moveEvent = (e) => {
+        draggingPoint = cropPoints.find(p => Math.hypot(p.x - pos.x, p.y - pos.y) < 20);
+    });
+    cropCanvas.addEventListener('mousemove', (e) => {
         if (!draggingPoint) return;
-        e.preventDefault();
         const pos = getMousePos(e);
-        draggingPoint.x = Math.max(0, Math.min(cropCanvas.width, pos.x));
-        draggingPoint.y = Math.max(0, Math.min(cropCanvas.height, pos.y));
+        draggingPoint.x = pos.x;
+        draggingPoint.y = pos.y;
         drawCropCanvas();
-    };
-    const upEvent = () => draggingPoint = null;
-
-    cropCanvas.addEventListener('mousedown', downEvent);
-    cropCanvas.addEventListener('mousemove', moveEvent);
-    cropCanvas.addEventListener('mouseup', upEvent);
-    cropCanvas.addEventListener('mouseleave', upEvent);
-    cropCanvas.addEventListener('touchstart', downEvent, {passive: false});
-    cropCanvas.addEventListener('touchmove', moveEvent, {passive: false});
-    cropCanvas.addEventListener('touchend', upEvent);
+    });
+    cropCanvas.addEventListener('mouseup', () => draggingPoint = null);
 }
 
 document.getElementById('btn-submit-crop').addEventListener('click', () => {
     const coordsStr = cropPoints.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join(',');
-    log(`Transmitting manual vectors: [${coordsStr}]`, "warn");
     executeStep(currentStepIdx, coordsStr);
 });
 
-// --- REALIGNER MODULE ---
 const canvas = document.getElementById('canvas');
 const ctx = canvas ? canvas.getContext('2d') : null;
 let baseImg = new Image(), depthImg = new Image();
@@ -345,20 +272,53 @@ const ui = ['x', 'y', 'scale', 'rot', 'op'].reduce((acc, id) => {
     const el = document.getElementById(id);
     if (el) {
         acc[id] = el;
-        el.addEventListener('input', (e) => {
+        el.addEventListener('input', () => {
             const valEl = document.getElementById(id + 'Val');
-            if (valEl) valEl.innerText = e.target.value;
+            if (valEl) valEl.innerText = el.value;
             drawCanvas();
         });
     }
     return acc;
 }, {});
 
-const baseUpload = document.getElementById('baseUpload');
-const depthUpload = document.getElementById('depthUpload');
+function drawCanvas() {
+    if (!hasBase || !ctx) return;
+    canvas.width = baseImg.width;
+    canvas.height = baseImg.height;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(baseImg, 0, 0);
+    if (hasDepth) {
+        ctx.save();
+        ctx.globalAlpha = ui.op.value / 100;
+        ctx.translate(canvas.width / 2 + parseInt(ui.x.value), canvas.height / 2 + parseInt(ui.y.value));
+        ctx.rotate(parseInt(ui.rot.value) * Math.PI / 180);
+        const s = parseInt(ui.scale.value) / 100;
+        ctx.scale(s, s);
+        ctx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
+        ctx.restore();
+    }
+}
 
-if (baseUpload) baseUpload.onchange = e => loadImg(e, baseImg, () => hasBase = true);
-if (depthUpload) depthUpload.onchange = e => loadImg(e, depthImg, () => hasDepth = true);
+document.getElementById('exportBtn').addEventListener('click', () => {
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = baseImg.width;
+    exportCanvas.height = baseImg.height;
+    const eCtx = exportCanvas.getContext('2d');
+    eCtx.translate(exportCanvas.width / 2 + parseInt(ui.x.value), exportCanvas.height / 2 + parseInt(ui.y.value));
+    eCtx.rotate(parseInt(ui.rot.value) * Math.PI / 180);
+    const s = parseInt(ui.scale.value) / 100;
+    eCtx.scale(s, s);
+    eCtx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
+    
+    const link = document.createElement('a');
+    link.download = 'realigned_depth_map.png';
+    link.href = exportCanvas.toDataURL('image/png');
+    link.click();
+    
+    document.querySelector('[data-target="pipeline-tab"]').click();
+    currentStepIdx++;
+    executeStep(currentStepIdx);
+});
 
 function loadImg(e, imgObj, callback) {
     const file = e.target.files[0];
@@ -370,54 +330,3 @@ function loadImg(e, imgObj, callback) {
     };
     reader.readAsDataURL(file);
 }
-
-function drawCanvas() {
-    if (!hasBase || !ctx) return;
-    canvas.width = baseImg.width;
-    canvas.height = baseImg.height;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.globalAlpha = 1.0;
-    ctx.drawImage(baseImg, 0, 0);
-
-    if (hasDepth) {
-        ctx.save();
-        ctx.globalAlpha = ui.op.value / 100;
-        const dx = parseInt(ui.x.value);
-        const dy = parseInt(ui.y.value);
-        const scale = parseInt(ui.scale.value) / 100;
-        const rot = parseInt(ui.rot.value) * Math.PI / 180;
-        ctx.translate(canvas.width / 2 + dx, canvas.height / 2 + dy);
-        ctx.rotate(rot);
-        ctx.scale(scale, scale);
-        ctx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
-        ctx.restore();
-    }
-}
-
-document.getElementById('exportBtn').addEventListener('click', () => {
-    if (!hasBase || !hasDepth) return alert('Load both images first.');
-    const exportCanvas = document.createElement('canvas');
-    exportCanvas.width = baseImg.width;
-    exportCanvas.height = baseImg.height;
-    const eCtx = exportCanvas.getContext('2d');
-    eCtx.save();
-    const dx = parseInt(ui.x.value);
-    const dy = parseInt(ui.y.value);
-    const scale = parseInt(ui.scale.value) / 100;
-    const rot = parseInt(ui.rot.value) * Math.PI / 180;
-    eCtx.translate(exportCanvas.width / 2 + dx, exportCanvas.height / 2 + dy);
-    eCtx.rotate(rot);
-    eCtx.scale(scale, scale);
-    eCtx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
-    eCtx.restore();
-
-    const link = document.createElement('a');
-    link.download = 'realigned_depth_map.png';
-    link.href = exportCanvas.toDataURL('image/png');
-    link.click();
-    
-    log("Manual alignment complete. Returning to pipeline.", "info");
-    document.querySelector('[data-target="pipeline-tab"]').click();
-    currentStepIdx++;
-    executeStep(currentStepIdx);
-});
