@@ -69,6 +69,7 @@ export default {
         const cacheBuster = `&t=${new Date(latestRun.updated_at).getTime() || Date.now()}`;
 
         const payload = {
+          run_id: latestRun.id, // Exposing the ID to cure the frontend's amnesia
           status: latestRun.status,
           conclusion: latestRun.conclusion,
           jobs: jobsData.jobs || [],
