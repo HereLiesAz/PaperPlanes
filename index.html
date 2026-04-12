@@ -1,285 +1,50 @@
-import sys
-import os
-import io
-import zipfile
-import glob
-import re
-import cv2
-import numpy as np
-import time
-from PIL import Image
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PaperPlanes Segmentation</title>
+    <style>
+        body { background: #121212; color: #e0e0e0; font-family: system-ui, -apple-system, sans-serif; padding: 2rem; display: flex; justify-content: center; }
+        .container { background: #1e1e1e; border: 1px solid #333; padding: 2rem; width: 100%; max-width: 500px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        h1 { font-size: 1.5rem; border-bottom: 1px solid #333; padding-bottom: 1rem; margin-top: 0; }
+        .input-group { margin-bottom: 1.5rem; background: #252525; padding: 1rem; border-radius: 4px; border: 1px solid #444; }
+        label { display: block; margin-bottom: 0.5rem; color: #aaa; font-size: 0.9rem; font-weight: 500; }
+        input[type="file"] { width: 100%; color: #ccc; cursor: pointer; }
+        .slider-control { margin-bottom: 2rem; }
+        input[type="range"] { width: 100%; cursor: pointer; }
+        button { width: 100%; padding: 1rem; background: #007bff; color: #fff; border: none; font-size: 1rem; font-weight: 600; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: #0056b3; }
+        #status { margin-top: 1.5rem; text-align: center; color: #888; font-size: 0.9rem; min-height: 1.5rem; }
+    </style>
+</head>
+<body>
 
-def log(msg):
-    # Standardize timestamped logging for the Actions console
-    t = time.strftime("%H:%M:%S")
-    print(f"[{t}] {msg}", flush=True)
+    <div class="container">
+        <h1>PaperPlanes Pipeline</h1>
 
-def get_input_file():
-    files = glob.glob("inbox/*")
-    log(f"Scanning inbox. Found: {files}")
-    target = next((f for f in files if f.lower().endswith(('.png', '.jpg', '.jpeg'))), None)
-    log(f"Selected target: {target}")
-    return target
+        <div class="input-group">
+            <label for="sourceInput">Source Image</label>
+            <input type="file" id="sourceInput" accept="image/png, image/jpeg">
+        </div>
 
-def remove_background():
-    log("=== JOB 1: REMOVE BACKGROUND ===")
-    from rembg import remove
-    
-    os.makedirs("workspace", exist_ok=True)
-    file_path = get_input_file()
-    
-    if not file_path:
-        log("FATAL: No valid image found in inbox.")
-        sys.exit(1)
-        
-    log(f"Opening original image: {file_path}")
-    image = Image.open(file_path).convert("RGB")
-    log(f"Original image size: {image.size}")
-    
-    log("Executing rembg on CPU...")
-    start_time = time.time()
-    image_nobg = remove(image)
-    log(f"rembg completed in {time.time() - start_time:.2f} seconds.")
-    
-    mask = np.array(image_nobg)[:, :, 3]
-    active_pixels = np.count_nonzero(mask)
-    total_pixels = mask.size
-    log(f"Mask generated. Active pixels: {active_pixels} / {total_pixels} ({(active_pixels/total_pixels)*100:.2f}%)")
-    
-    Image.fromarray(mask).save("workspace/subject_mask.png")
-    log("Subject mask saved to workspace/subject_mask.png")
+        <div class="slider-control">
+            <label for="layersInput">Target Layers: <span id="layerDisplay">6</span></label>
+            <input type="range" id="layersInput" min="2" max="12" value="6">
+        </div>
 
-def generate_image():
-    log("=== JOB 2: GENERATE HALLUCINATION ===")
-    import torch
-    from diffusers import StableDiffusionImg2ImgPipeline
-    
-    os.makedirs("workspace", exist_ok=True)
-    file_path = get_input_file()
-    
-    log(f"Loading initial image: {file_path}")
-    init_image = Image.open(file_path).convert("RGB")
-    
-    log("Loading Stable Diffusion Pipeline (runwayml/stable-diffusion-v1-5)...")
-    start_time = time.time()
-    pipe = StableDiffusionImg2ImgPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", torch_dtype=torch.float32)
-    pipe.safety_checker = None
-    log(f"Pipeline loaded in {time.time() - start_time:.2f} seconds.")
-    
-    prompt = "A high fidelity 3D render, volumetric depth, clear geometry, structural, high contrast"
-    log(f"Executing generation with prompt: '{prompt}'")
-    log("Strength: 0.65, Guidance: 7.5")
-    
-    gen_start = time.time()
-    generated = pipe(prompt=prompt, image=init_image, strength=0.65, guidance_scale=7.5).images[0]
-    log(f"Generation completed in {time.time() - gen_start:.2f} seconds.")
-    
-    generated.save("workspace/generated_image.png")
-    log("Hallucination saved to workspace/generated_image.png")
+        <button id="processBtn">Run Pipeline</button>
+        <div id="status">Ready.</div>
+    </div>
 
-def align_images():
-    log("=== JOB 3: ALIGN IMAGES ===")
-    os.makedirs("workspace", exist_ok=True)
-    file_path = get_input_file()
+    <script type="module" src="app.js"></script>
     
-    log("Reading source and generated images into OpenCV...")
-    source_cv = cv2.imread(file_path)
-    gen_cv = cv2.imread("workspace/generated_image.png")
-    
-    log(f"Source shape: {source_cv.shape}, Generated shape (before resize): {gen_cv.shape}")
-    gen_cv = cv2.resize(gen_cv, (source_cv.shape[1], source_cv.shape[0]))
-    log(f"Generated image resized to: {gen_cv.shape}")
-    
-    gray_src = cv2.cvtColor(source_cv, cv2.COLOR_BGR2GRAY)
-    gray_tgt = cv2.cvtColor(gen_cv, cv2.COLOR_BGR2GRAY)
-
-    log("Initializing ORB Feature Detector (Max 5000 features)...")
-    orb = cv2.ORB_create(MAX_FEATURES=5000)
-    kp_src, des_src = orb.detectAndCompute(gray_src, None)
-    kp_tgt, des_tgt = orb.detectAndCompute(gray_tgt, None)
-    
-    log(f"Features detected - Source: {len(kp_src)}, Generated: {len(kp_tgt)}")
-
-    if des_src is None or des_tgt is None:
-        log("WARNING: Failed to detect features in one or both images. Falling back to unaligned.")
-        cv2.imwrite("workspace/aligned_image.png", gen_cv)
-        return
-
-    log("Matching features using BFMatcher (Hamming)...")
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-    matches = bf.knnMatch(des_src, des_tgt, k=2)
-
-    log(f"Total raw matches found: {len(matches)}")
-    good_matches = [m for m, n in matches if m.distance < 0.75 * n.distance]
-    log(f"Good matches after Lowe's ratio test: {len(good_matches)}")
-
-    if len(good_matches) > 10:
-        log("Calculating Homography matrix...")
-        src_pts = np.float32([kp_src[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-        tgt_pts = np.float32([kp_tgt[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-        matrix, mask = cv2.findHomography(tgt_pts, src_pts, cv2.RANSAC, 5.0)
-        
-        if matrix is not None:
-            log(f"Homography matrix computed successfully. Inliers: {np.sum(mask)} / {len(good_matches)}")
-            aligned = cv2.warpPerspective(gen_cv, matrix, (source_cv.shape[1], source_cv.shape[0]))
-            log("Perspective warp applied.")
-        else:
-            log("WARNING: Homography matrix calculation failed (returned None). Falling back to unaligned.")
-            aligned = gen_cv
-    else:
-        log("WARNING: Insufficient good matches (< 10). Homography aborted. Falling back to unaligned.")
-        aligned = gen_cv
-
-    cv2.imwrite("workspace/aligned_image.png", aligned)
-    log("Aligned image saved to workspace/aligned_image.png")
-
-def extract_depth():
-    log("=== JOB 4: EXTRACT DEPTH ===")
-    import torch
-    from transformers import pipeline
-    
-    os.makedirs("workspace", exist_ok=True)
-    device = 0 if torch.cuda.is_available() else -1
-    log(f"Device selected for depth extraction: {'CUDA (0)' if device == 0 else 'CPU (-1)'}")
-    
-    log("Loading Depth-Anything-V2 Pipeline...")
-    start_time = time.time()
-    depth_pipe = pipeline("depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf", device=device)
-    log(f"Depth pipeline loaded in {time.time() - start_time:.2f} seconds.")
-    
-    log("Loading aligned generated image...")
-    aligned_pil = Image.open("workspace/aligned_image.png").convert("RGB")
-    
-    log("Executing depth inference...")
-    inf_start = time.time()
-    depth_result = depth_pipe(aligned_pil)
-    log(f"Depth inference completed in {time.time() - inf_start:.2f} seconds.")
-    
-    depth_array = np.array(depth_result["depth"]).astype(np.float32)
-    log(f"Raw Depth Array - Shape: {depth_array.shape}, Min: {depth_array.min():.4f}, Max: {depth_array.max():.4f}, Mean: {depth_array.mean():.4f}")
-    
-    np.save("workspace/depth_map.npy", depth_array)
-    log("Raw depth map saved to workspace/depth_map.npy")
-
-def segment_layers():
-    log("=== JOB 5: SEGMENT LAYERS ===")
-    file_path = get_input_file()
-    
-    match = re.search(r'_layers-(\d+)\.', file_path)
-    layers = int(match.group(1)) if match else 6
-    log(f"Requested strata count parsed: {layers}")
-
-    log("Loading arrays into memory...")
-    source_array = np.array(Image.open(file_path).convert("RGB"))
-    mask_array = np.array(Image.open("workspace/subject_mask.png")) > 0
-    depth_array = np.load("workspace/depth_map.npy")
-    
-    log(f"Source Array: {source_array.shape}, Mask Array: {mask_array.shape}, Depth Array: {depth_array.shape}")
-
-    subject_depth = depth_array[mask_array]
-    log(f"Pixels in subject mask: {len(subject_depth)}")
-    
-    if len(subject_depth) == 0:
-        log("FATAL Error: Subject mask is completely empty. Cannot normalize depth.")
-        return
-
-    min_depth, max_depth = subject_depth.min(), subject_depth.max()
-    log(f"Pre-Normalization - Subject Min Depth: {min_depth:.4f}, Max Depth: {max_depth:.4f}")
-    
-    if min_depth == max_depth:
-        log("WARNING: Subject depth is entirely flat. Min == Max. Normalization will fail gracefully.")
-        normalized_depth = np.zeros_like(depth_array)
-    else:
-        normalized_depth = np.zeros_like(depth_array)
-        normalized_depth[mask_array] = np.interp(depth_array[mask_array], (min_depth, max_depth), (0, 255))
-        log("Depth normalized to 0-255 scale within subject boundaries.")
-
-    bins = np.linspace(0, 255.1, layers + 1)
-    log(f"Calculated depth bins: {bins}")
-    
-    log("Opening zipfile for packaging...")
-    with zipfile.ZipFile("paper_planes_layers.zip", "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for i in range(layers):
-            layer_mask = (normalized_depth >= bins[i]) & (normalized_depth < bins[i+1]) & mask_array
-            active_pixels = np.count_nonzero(layer_mask)
-            
-            log(f"Layer {i:03d} - Active pixels: {active_pixels}")
-            
-            if active_pixels > 0:
-                layer_rgba = np.zeros((source_array.shape[0], source_array.shape[1], 4), dtype=np.uint8)
-                layer_rgba[..., :3] = source_array
-                mask_smoothed = cv2.GaussianBlur((layer_mask * 255).astype(np.uint8), (5, 5), 0)
-                layer_rgba[..., 3] = mask_smoothed
-                
-                img_byte_arr = io.BytesIO()
-                Image.fromarray(layer_rgba).save(img_byte_arr, format='PNG')
-                filename = f"layer_{i:03d}.png"
-                zip_file.writestr(filename, img_byte_arr.getvalue())
-                log(f"  -> {filename} packaged successfully.")
-            else:
-                log(f"  -> Layer {i:03d} skipped (empty).")
-                
-    log("Segmentation complete. Output finalized at paper_planes_layers.zip.")
-
-def auto_align_depth():
-    log("=== JOB 6: AUTO-ALIGN DEPTH ===")
-    os.makedirs("workspace", exist_ok=True)
-    
-    original_path = get_input_file()
-    if not original_path:
-        log("FATAL: No valid image found in inbox.")
-        sys.exit(1)
-        
-    depth_path = "workspace/depth_map.png"
-    if not os.path.exists(depth_path):
-        candidates = [f for f in glob.glob("workspace/*") if 'depth' in f.lower() and f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-        if candidates:
-            depth_path = candidates[0]
-        else:
-            log("FATAL: No depth map found in workspace to align.")
-            sys.exit(1)
-            
-    log(f"Loading Original: {original_path}")
-    log(f"Loading Depth Map: {depth_path}")
-    
-    original_img = cv2.imread(original_path, cv2.IMREAD_GRAYSCALE)
-    depth_map = cv2.imread(depth_path, cv2.IMREAD_GRAYSCALE)
-    
-    if original_img is None or depth_map is None:
-        log("FATAL: I/O Failure during image load.")
-        sys.exit(1)
-        
-    warp_mode = cv2.MOTION_AFFINE
-    warp_matrix = np.eye(2, 3, dtype=np.float32)
-    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 5000, 1e-10)
-    
-    try:
-        log("Maximizing correlation coefficient (ECC)...")
-        _, warp_matrix = cv2.findTransformECC(original_img, depth_map, warp_matrix, warp_mode, criteria, None, 5)
-        aligned_depth = cv2.warpAffine(
-            depth_map, 
-            warp_matrix, 
-            (original_img.shape[1], original_img.shape[0]), 
-            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP
-        )
-        out_path = "workspace/aligned_depth_map.png"
-        cv2.imwrite(out_path, aligned_depth)
-        log(f"Alignment converged. File written to: {out_path}")
-    except cv2.error:
-        log("FATAL: Convergence failed. Initial misalignment is too severe. Fallback to manual UI.")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python pipeline.py <job_name>")
-        sys.exit(1)
-        
-    job = sys.argv[1]
-    if job == "remove_bg": remove_background()
-    elif job == "generate": generate_image()
-    elif job == "align": align_images()
-    elif job == "depth": extract_depth()
-    elif job == "segment": segment_layers()
-    elif job == "align_depth": auto_align_depth()
-    else:
-        print(f"Unknown job: {job}")
+    <script>
+        const slider = document.getElementById('layersInput');
+        const display = document.getElementById('layerDisplay');
+        slider.addEventListener('input', (e) => {
+            display.textContent = e.target.value;
+        });
+    </script>
+</body>
+</html>
