@@ -29,18 +29,14 @@ export default {
           headers: {
             "User-Agent": "Cloudflare-Worker",
             "Authorization": `Bearer ${githubToken}`,
-            "Accept": "application/vnd.github.v3.raw" // Tells GitHub to send the raw binary, not base64 JSON
+            "Accept": "application/vnd.github.v3.raw" 
           }
         });
 
         if (!fileRes.ok) {
-          return new Response("Artifact not found or still generating", { 
-            status: 404, 
-            headers: corsHeaders 
-          });
+          return new Response("Artifact not found or still generating", { status: 404, headers: corsHeaders });
         }
 
-        // Stream the binary image data directly to the browser
         const headers = new Headers(fileRes.headers);
         headers.set("Access-Control-Allow-Origin", "*");
         return new Response(fileRes.body, { headers });
@@ -56,26 +52,19 @@ export default {
 
         const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=1`, { headers });
         if (!runsRes.ok) {
-          return new Response(JSON.stringify({ error: "GITHUB API REJECTED GET", details: await runsRes.text() }), { 
-            status: 418, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
+          return new Response(JSON.stringify({ error: "GITHUB API REJECTED GET", details: await runsRes.text() }), { status: 418, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
 
         const runsData = await runsRes.json();
         const latestRun = runsData.workflow_runs[0];
 
         if (!latestRun) {
-          return new Response(JSON.stringify({ status: "idle", conclusion: null, jobs: [] }), { 
-            status: 200, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
+          return new Response(JSON.stringify({ status: "idle", conclusion: null, jobs: [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
 
         const jobsRes = await fetch(latestRun.jobs_url, { headers });
         const jobsData = jobsRes.ok ? await jobsRes.json() : { jobs: [] };
 
-        // Construct proxy URLs routing through this exact worker
         const baseUrl = url.origin + url.pathname;
         const cacheBuster = `&t=${new Date(latestRun.updated_at).getTime() || Date.now()}`;
 
@@ -90,16 +79,13 @@ export default {
           }
         };
 
-        return new Response(JSON.stringify(payload), {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
+        return new Response(JSON.stringify(payload), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       // --- TRIGGER ENDPOINT (POST) ---
       if (request.method === "POST") {
         const body = await request.json();
-        const { path, content, message, job, layers } = body;
+        const { path, content, message, job, layers, coords } = body;
 
         if (!path || !content) {
           return new Response(JSON.stringify({ error: "MALFORMED PAYLOAD" }), { status: 418, headers: corsHeaders });
@@ -133,7 +119,7 @@ export default {
         });
 
         if (!putRes.ok) {
-          return new Response(JSON.stringify({ error: "GITHUB API REJECTED PUT (Code Upload)", details: await putRes.text() }), { status: 418, headers: corsHeaders });
+          return new Response(JSON.stringify({ error: "GITHUB API REJECTED PUT", details: await putRes.text() }), { status: 418, headers: corsHeaders });
         }
 
         const dispatchRes = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
@@ -144,7 +130,8 @@ export default {
             client_payload: {
               job: job || "segment",
               layers: layers || "6",
-              file: path
+              file: path,
+              coords: coords || ""
             }
           })
         });
@@ -153,23 +140,13 @@ export default {
           return new Response(JSON.stringify({ error: "GITHUB API REJECTED DISPATCH", details: await dispatchRes.text() }), { status: 418, headers: corsHeaders });
         }
 
-        return new Response(JSON.stringify({ success: true, message: "Payload delivered. GitHub Runner awoken." }), {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
+        return new Response(JSON.stringify({ success: true, message: "Payload delivered. GitHub Runner awoken." }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       return new Response(JSON.stringify({ error: "Method Not Allowed" }), { status: 405, headers: corsHeaders });
 
     } catch (error) {
-      return new Response(JSON.stringify({ 
-        error: "WORKER FATAL CRASH", 
-        message: error.message, 
-        stack: error.stack 
-      }), { 
-        status: 202, 
-        headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
+      return new Response(JSON.stringify({ error: "WORKER FATAL CRASH", message: error.message, stack: error.stack }), { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
   }
 };
