@@ -44,7 +44,6 @@ let base64Payload = null;
 let currentFileName = null;
 let isAwaitingManualWarp = false;
 
-// The Ledger of Reality
 let processedRuns = new Set();
 let activeRunTracker = null;
 
@@ -141,6 +140,15 @@ async function pollTelemetry(step) {
         if (data.status === 'completed') {
             if (data.run_id && processedRuns.has(data.run_id)) {
                 return; 
+            }
+
+            if (data.conclusion === 'failure') {
+                clearInterval(pollInterval);
+                log(`FATAL: The GitHub Runner crashed during execution, or the commit was rejected by reality. Verify the Actions log in GitHub.`, "error");
+                terminalStatus.textContent = 'CRITICAL FAULT';
+                terminalStatus.style.color = '#ff4444';
+                document.getElementById('init-container').style.display = 'block';
+                return;
             }
 
             if (data.run_id) processedRuns.add(data.run_id);
