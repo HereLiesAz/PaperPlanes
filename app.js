@@ -1,11 +1,7 @@
-// --- PWA Initialization ---
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js')
-        .then(() => console.log("Service Worker Registered"))
-        .catch(err => console.error("Service Worker Failed", err));
+    navigator.serviceWorker.register('./sw.js').catch(err => console.error(err));
 }
 
-// --- Tab Navigation ---
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -15,7 +11,147 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
-// --- REALIGNER MODULE (Initialized first so pipeline can feed it) ---
+const terminal = document.getElementById('terminal');
+const terminalStatus = document.getElementById('terminalStatus');
+
+function log(msg, level = 'info') {
+    const now = new Date();
+    const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+    const line = document.createElement('div');
+    line.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="log-${level}">${msg}</span>`;
+    terminal.appendChild(line);
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+const slider = document.getElementById('layersInput');
+const display = document.getElementById('layerDisplay');
+if (slider && display) {
+    slider.addEventListener('input', (e) => display.textContent = e.target.value);
+}
+
+// --- PIPELINE WIZARD STATE MACHINE ---
+const WORKFLOW = [
+    { id: 'crop', title: 'Step 1: Perspective & Crop Validation', output: '/workspace/cropped_image.png' },
+    { id: 'generate', title: 'Step 2: AI Hallucination Validation', output: '/workspace/generated_image.png' },
+    { id: 'depth', title: 'Step 3: Depth Map Extraction', output: '/workspace/raw_depth_map.png' },
+    { id: 'align', title: 'Step 4: Manual Realignment', output: null },
+    { id: 'segment', title: 'Step 5: Final Segmentation', output: '/workspace/paper_planes_layers.zip' }
+];
+
+let currentStepIdx = 0;
+let pollInterval = null;
+const proxyUrl = "https://paperplanes.hereliesaz.workers.dev"; 
+let base64Payload = null;
+let currentFileName = null;
+
+document.getElementById('sourceInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        base64Payload = event.target.result.split(',')[1];
+        currentFileName = file.name;
+        // Pre-load realigner base
+        loadImg(e, baseImg, () => { hasBase = true; drawCanvas(); });
+    };
+    reader.readAsDataURL(file);
+});
+
+document.getElementById('processBtn').addEventListener('click', () => {
+    if (!base64Payload) {
+        log("FATAL: Source image required.", "error");
+        return;
+    }
+    document.getElementById('init-container').style.display = 'none';
+    currentStepIdx = 0;
+    executeStep(currentStepIdx);
+});
+
+async function executeStep(index) {
+    const step = WORKFLOW[index];
+    if (!step) return;
+
+    terminalStatus.textContent = `EXECUTING: ${step.id.toUpperCase()}`;
+    terminalStatus.style.color = '#ffaa00';
+    log(`--- INITIATING: ${step.name} ---`);
+    document.getElementById('approval-ui').style.display = 'none';
+
+    if (step.id === 'align') {
+        log("Redirecting to Realigner Tab for manual override.", "warn");
+        document.querySelector('[data-target="realigner-tab"]').click();
+        return;
+    }
+
+    try {
+        const response = await fetch(proxyUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                path: `inbox/${currentFileName}`,
+                content: base64Payload,
+                job: step.id,
+                layers: document.getElementById('layersInput').value
+            })
+        });
+
+        if (response.ok) {
+            pollInterval = setInterval(() => pollTelemetry(step), 5000);
+        } else {
+            log(`Proxy HTTP ${response.status}`, "error");
+            terminalStatus.textContent = 'NETWORK FAULT';
+        }
+    } catch (error) {
+        log(`Transmission failed: ${error.message}`, "error");
+        terminalStatus.textContent = 'OFFLINE';
+    }
+}
+
+async function pollTelemetry(step) {
+    try {
+        const response = await fetch(proxyUrl, { method: 'GET' });
+        if (!response.ok) return;
+        const data = await response.json();
+        
+        if (data.status === 'completed') {
+            clearInterval(pollInterval);
+            terminalStatus.textContent = "AWAITING APPROVAL";
+            terminalStatus.style.color = '#00ff00';
+            log(`${step.name} completed. Awaiting human consent.`, "info");
+            
+            if (step.id === 'segment') {
+                log("Final artifact paper_planes_layers.zip generated. Pipeline terminated.", "info");
+                return;
+            }
+
+            // Present approval UI
+            const outUrl = data.artifacts?.output || step.output;
+            document.getElementById('approval-title').textContent = step.title;
+            document.getElementById('approval-preview').src = outUrl;
+            document.getElementById('approval-ui').style.display = 'block';
+            
+            // Wire depth map into realigner proactively
+            if (step.id === 'depth') {
+                depthImg.onload = () => { hasDepth = true; drawCanvas(); };
+                depthImg.src = outUrl;
+            }
+        }
+    } catch (error) {
+        console.error("Polling error:", error);
+    }
+}
+
+document.getElementById('btn-approve').addEventListener('click', () => {
+    currentStepIdx++;
+    executeStep(currentStepIdx);
+});
+
+document.getElementById('btn-reject').addEventListener('click', () => {
+    log(`Human rejected artifact for ${WORKFLOW[currentStepIdx].name}. Halting.`, "error");
+    document.getElementById('approval-ui').style.display = 'none';
+    document.getElementById('init-container').style.display = 'block';
+});
+
+// --- REALIGNER MODULE ---
 const canvas = document.getElementById('canvas');
 const ctx = canvas ? canvas.getContext('2d') : null;
 let baseImg = new Image(), depthImg = new Image();
@@ -78,180 +214,34 @@ function drawCanvas() {
     }
 }
 
-const exportBtn = document.getElementById('exportBtn');
-if (exportBtn) {
-    exportBtn.onclick = () => {
-        if (!hasBase || !hasDepth) return alert('Load both images first.');
-        
-        const exportCanvas = document.createElement('canvas');
-        exportCanvas.width = baseImg.width;
-        exportCanvas.height = baseImg.height;
-        const eCtx = exportCanvas.getContext('2d');
-        
-        eCtx.save();
-        const dx = parseInt(ui.x.value);
-        const dy = parseInt(ui.y.value);
-        const scale = parseInt(ui.scale.value) / 100;
-        const rot = parseInt(ui.rot.value) * Math.PI / 180;
+document.getElementById('exportBtn').addEventListener('click', () => {
+    if (!hasBase || !hasDepth) return alert('Load both images first.');
+    
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width = baseImg.width;
+    exportCanvas.height = baseImg.height;
+    const eCtx = exportCanvas.getContext('2d');
+    
+    eCtx.save();
+    const dx = parseInt(ui.x.value);
+    const dy = parseInt(ui.y.value);
+    const scale = parseInt(ui.scale.value) / 100;
+    const rot = parseInt(ui.rot.value) * Math.PI / 180;
 
-        eCtx.translate(exportCanvas.width / 2 + dx, exportCanvas.height / 2 + dy);
-        eCtx.rotate(rot);
-        eCtx.scale(scale, scale);
-        eCtx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
-        eCtx.restore();
+    eCtx.translate(exportCanvas.width / 2 + dx, exportCanvas.height / 2 + dy);
+    eCtx.rotate(rot);
+    eCtx.scale(scale, scale);
+    eCtx.drawImage(depthImg, -depthImg.width / 2, -depthImg.height / 2);
+    eCtx.restore();
 
-        const link = document.createElement('a');
-        link.download = 'realigned_depth_map.png';
-        link.href = exportCanvas.toDataURL('image/png');
-        link.click();
-    };
-}
-
-// --- PIPELINE MODULE ---
-const terminal = document.getElementById('terminal');
-const terminalStatus = document.getElementById('terminalStatus');
-let pollInterval = null;
-
-function log(msg, level = 'info') {
-    const now = new Date();
-    const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
-    const line = document.createElement('div');
-    line.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="log-${level}">${msg}</span>`;
-    terminal.appendChild(line);
-    terminal.scrollTop = terminal.scrollHeight;
-}
-
-const slider = document.getElementById('layersInput');
-const display = document.getElementById('layerDisplay');
-if (slider && display) {
-    slider.addEventListener('input', (e) => {
-        display.textContent = e.target.value;
-    });
-}
-
-// Auto-wire the original image into the realigner upon selection
-document.getElementById('sourceInput').addEventListener('change', (e) => {
-    loadImg(e, baseImg, () => {
-        hasBase = true;
-        drawCanvas();
-        log("Original image loaded. Auto-wired into Realigner base layer.", "info");
-    });
+    // In a real flow, this sends realigned_depth_map.png to the proxy. We simulate by downloading and progressing.
+    const link = document.createElement('a');
+    link.download = 'realigned_depth_map.png';
+    link.href = exportCanvas.toDataURL('image/png');
+    link.click();
+    
+    log("Manual alignment complete. Returning to pipeline.", "info");
+    document.querySelector('[data-target="pipeline-tab"]').click();
+    currentStepIdx++;
+    executeStep(currentStepIdx);
 });
-
-async function pollTelemetry(proxyUrl) {
-    try {
-        const response = await fetch(proxyUrl, { method: 'GET' });
-        if (!response.ok) return;
-
-        const data = await response.json();
-        
-        if (data.status === 'completed') {
-            clearInterval(pollInterval);
-            terminalStatus.textContent = data.conclusion.toUpperCase();
-            terminalStatus.style.color = data.conclusion === 'success' ? '#00ff00' : '#ff4444';
-            log(`Workflow execution completed with status: ${data.conclusion.toUpperCase()}`, data.conclusion === 'success' ? 'info' : 'error');
-            
-            if (data.conclusion === 'success') {
-                // Outsmarting reality by assuming the proxy serves up the artifacts at these logical URLs
-                const photoUrl = data.artifacts?.photo || '/workspace/generated_image.png';
-                const depthUrl = data.artifacts?.depth || '/workspace/raw_depth_map.png';
-                
-                document.getElementById('artifact-gallery').style.display = 'flex';
-                document.getElementById('gallery-photo').src = photoUrl;
-                document.getElementById('gallery-depth').src = depthUrl;
-                
-                // Feed the beast: Auto-load depth map into realigner overlay
-                depthImg.onload = () => { 
-                    hasDepth = true; 
-                    drawCanvas(); 
-                    log("Depth Topology extracted and wired to Realigner overlay. Switch tabs to adjust.", "warn");
-                };
-                depthImg.src = depthUrl;
-            }
-            return;
-        }
-
-        data.jobs.forEach(job => {
-            if (job.status === 'in_progress') {
-                const activeStep = job.steps.find(s => s.status === 'in_progress');
-                if (activeStep) {
-                    const msg = `[${job.name}] Executing: ${activeStep.name}...`;
-                    if (!terminal.lastChild || !terminal.lastChild.textContent.includes(msg)) {
-                        log(msg, "warn");
-                    }
-                }
-            } else if (job.status === 'completed' && job.conclusion === 'failure') {
-                const failedStep = job.steps.find(s => s.conclusion === 'failure');
-                if (failedStep) {
-                    log(`[${job.name}] FAILED at step: ${failedStep.name}`, "error");
-                }
-            }
-        });
-
-    } catch (error) {
-        console.error("Polling error:", error);
-    }
-}
-
-const processBtn = document.getElementById('processBtn');
-if (processBtn) {
-    processBtn.addEventListener('click', async () => {
-        const fileInput = document.getElementById('sourceInput');
-        const layersCount = document.getElementById('layersInput').value;
-        const proxyUrl = "https://paperplanes.hereliesaz.workers.dev"; 
-
-        terminal.innerHTML = '';
-        document.getElementById('artifact-gallery').style.display = 'none';
-        if (pollInterval) clearInterval(pollInterval);
-
-        terminalStatus.textContent = 'EXECUTING';
-        terminalStatus.style.color = '#ffaa00';
-        log("=== INITIATING PAPERPLANES PIPELINE ===");
-
-        if (!fileInput.files.length) {
-            log("FATAL: No source image selected.", "error");
-            terminalStatus.textContent = 'HALTED';
-            terminalStatus.style.color = '#ff4444';
-            return;
-        }
-
-        const file = fileInput.files[0];
-        const newFilename = `original_layers-${layersCount}.${file.name.split('.').pop()}`;
-        
-        log(`File acquired: ${newFilename}`);
-
-        const reader = new FileReader();
-        reader.onload = async function(event) {
-            const base64Content = event.target.result.split(',')[1];
-            log("Transmitting payload to Cloudflare Proxy...", "warn");
-
-            try {
-                const response = await fetch(proxyUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        path: `inbox/${newFilename}`,
-                        content: base64Content,
-                        message: `Pipeline upload: ${newFilename}`
-                    })
-                });
-
-                if (response.ok) {
-                    log("=== UPLOAD SUCCESS ===", "info");
-                    log("Corpse injected into repository. Waking the Cloud Runner...");
-                    terminalStatus.textContent = 'POLLING TELEMETRY';
-                    
-                    pollInterval = setInterval(() => pollTelemetry(proxyUrl), 5000);
-                } else {
-                    const errData = await response.text();
-                    log(`Proxy responded with HTTP ${response.status}: ${errData}`, "error");
-                    terminalStatus.textContent = 'NETWORK FAULT';
-                }
-            } catch (error) {
-                log(`Network transmission failed: ${error.message}`, "error");
-                terminalStatus.textContent = 'OFFLINE';
-            }
-        };
-        reader.readAsDataURL(file);
-    });
-}
