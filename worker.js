@@ -11,21 +11,43 @@ export default {
     }
 
     try {
-      // --- POLLING ENDPOINT (GET) ---
-      if (request.method === "GET") {
-        const repo = env.GH_REPO;
-        const githubToken = env.GH_TOKEN; 
-        
-        if (!githubToken || !repo) {
-          return new Response(JSON.stringify({ 
-            error: "SECRETS MISSING", 
-            details: `Worker sees GH_TOKEN: ${!!githubToken}, GH_REPO: ${!!repo}` 
-          }), { 
-            status: 418, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      const url = new URL(request.url);
+      const repo = env.GH_REPO;
+      const githubToken = env.GH_TOKEN; 
+
+      if (!githubToken || !repo) {
+        return new Response(JSON.stringify({ error: "SECRETS MISSING" }), { 
+          status: 418, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
+      }
+
+      // --- IMAGE PROXY ENDPOINT (GET with ?file=...) ---
+      const fileParam = url.searchParams.get("file");
+      if (request.method === "GET" && fileParam) {
+        const fileRes = await fetch(`https://api.github.com/repos/${repo}/contents/${fileParam}`, {
+          headers: {
+            "User-Agent": "Cloudflare-Worker",
+            "Authorization": `Bearer ${githubToken}`,
+            "Accept": "application/vnd.github.v3.raw" // Tells GitHub to send the raw binary, not base64 JSON
+          }
+        });
+
+        if (!fileRes.ok) {
+          return new Response("Artifact not found or still generating", { 
+            status: 404, 
+            headers: corsHeaders 
           });
         }
 
+        // Stream the binary image data directly to the browser
+        const headers = new Headers(fileRes.headers);
+        headers.set("Access-Control-Allow-Origin", "*");
+        return new Response(fileRes.body, { headers });
+      }
+
+      // --- POLLING ENDPOINT (GET) ---
+      if (request.method === "GET") {
         const headers = {
           "User-Agent": "Cloudflare-Worker",
           "Authorization": `Bearer ${githubToken}`,
@@ -34,8 +56,7 @@ export default {
 
         const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=1`, { headers });
         if (!runsRes.ok) {
-          const ghErr = await runsRes.text();
-          return new Response(JSON.stringify({ error: "GITHUB API REJECTED GET", details: ghErr }), { 
+          return new Response(JSON.stringify({ error: "GITHUB API REJECTED GET", details: await runsRes.text() }), { 
             status: 418, 
             headers: { ...corsHeaders, "Content-Type": "application/json" } 
           });
@@ -54,18 +75,18 @@ export default {
         const jobsRes = await fetch(latestRun.jobs_url, { headers });
         const jobsData = jobsRes.ok ? await jobsRes.json() : { jobs: [] };
 
-        // Construct absolute URLs to GitHub's raw CDN, bypassing the cache with the run's update timestamp
-        const rawBase = `https://raw.githubusercontent.com/${repo}/main`;
-        const cacheBuster = `?t=${new Date(latestRun.updated_at).getTime() || Date.now()}`;
+        // Construct proxy URLs routing through this exact worker
+        const baseUrl = url.origin + url.pathname;
+        const cacheBuster = `&t=${new Date(latestRun.updated_at).getTime() || Date.now()}`;
 
         const payload = {
           status: latestRun.status,
           conclusion: latestRun.conclusion,
           jobs: jobsData.jobs || [],
           artifacts: {
-            output: `${rawBase}/workspace/cropped_image.png${cacheBuster}`, 
-            photo: `${rawBase}/workspace/generated_image.png${cacheBuster}`,
-            depth: `${rawBase}/workspace/raw_depth_map.png${cacheBuster}`
+            output: `${baseUrl}?file=workspace/cropped_image.png${cacheBuster}`, 
+            photo: `${baseUrl}?file=workspace/generated_image.png${cacheBuster}`,
+            depth: `${baseUrl}?file=workspace/raw_depth_map.png${cacheBuster}`
           }
         };
 
@@ -79,24 +100,9 @@ export default {
       if (request.method === "POST") {
         const body = await request.json();
         const { path, content, message, job, layers } = body;
-        const repo = env.GH_REPO;
-        const githubToken = env.GH_TOKEN;
-
-        if (!githubToken || !repo) {
-          return new Response(JSON.stringify({ 
-            error: "SECRETS MISSING", 
-            details: `Worker sees GH_TOKEN: ${!!githubToken}, GH_REPO: ${!!repo}. Did you deploy them properly?` 
-          }), { 
-            status: 418, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
-        }
 
         if (!path || !content) {
-          return new Response(JSON.stringify({ error: "MALFORMED PAYLOAD", details: "Path or content is null." }), { 
-            status: 418, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
+          return new Response(JSON.stringify({ error: "MALFORMED PAYLOAD" }), { status: 418, headers: corsHeaders });
         }
 
         const headers = {
@@ -127,11 +133,7 @@ export default {
         });
 
         if (!putRes.ok) {
-          const errText = await putRes.text();
-          return new Response(JSON.stringify({ error: "GITHUB API REJECTED PUT (Code Upload)", details: errText }), { 
-            status: 418, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
+          return new Response(JSON.stringify({ error: "GITHUB API REJECTED PUT (Code Upload)", details: await putRes.text() }), { status: 418, headers: corsHeaders });
         }
 
         const dispatchRes = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
@@ -148,11 +150,7 @@ export default {
         });
 
         if (!dispatchRes.ok) {
-          const errText = await dispatchRes.text();
-          return new Response(JSON.stringify({ error: "GITHUB API REJECTED DISPATCH (Workflow Trigger)", details: errText }), { 
-            status: 418, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          });
+          return new Response(JSON.stringify({ error: "GITHUB API REJECTED DISPATCH", details: await dispatchRes.text() }), { status: 418, headers: corsHeaders });
         }
 
         return new Response(JSON.stringify({ success: true, message: "Payload delivered. GitHub Runner awoken." }), {
@@ -161,10 +159,7 @@ export default {
         });
       }
 
-      return new Response(JSON.stringify({ error: "Method Not Allowed" }), { 
-        status: 405, 
-        headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), { status: 405, headers: corsHeaders });
 
     } catch (error) {
       return new Response(JSON.stringify({ 
