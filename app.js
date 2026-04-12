@@ -40,7 +40,7 @@ const WORKFLOW = [
 
 let currentStepIdx = 0;
 let pollInterval = null;
-const proxyUrl = "https://paperplanes.hereliesaz.workers.dev"; 
+const proxyUrl = "https://paperplanes.hereliesaz.workers.dev/api"; 
 let base64Payload = null;
 let currentFileName = null;
 
