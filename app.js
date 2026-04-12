@@ -15,128 +15,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     });
 });
 
-// --- PIPELINE MODULE ---
-const terminal = document.getElementById('terminal');
-const terminalStatus = document.getElementById('terminalStatus');
-let pollInterval = null;
-
-function log(msg, level = 'info') {
-    const now = new Date();
-    const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
-    const line = document.createElement('div');
-    line.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="log-${level}">${msg}</span>`;
-    terminal.appendChild(line);
-    terminal.scrollTop = terminal.scrollHeight;
-}
-
-const slider = document.getElementById('layersInput');
-const display = document.getElementById('layerDisplay');
-if (slider && display) {
-    slider.addEventListener('input', (e) => {
-        display.textContent = e.target.value;
-    });
-}
-
-async function pollTelemetry(proxyUrl) {
-    try {
-        const response = await fetch(proxyUrl, { method: 'GET' });
-        if (!response.ok) return;
-
-        const data = await response.json();
-        
-        if (data.status === 'completed') {
-            clearInterval(pollInterval);
-            terminalStatus.textContent = data.conclusion.toUpperCase();
-            terminalStatus.style.color = data.conclusion === 'success' ? '#00ff00' : '#ff4444';
-            log(`Workflow execution completed with status: ${data.conclusion.toUpperCase()}`, data.conclusion === 'success' ? 'info' : 'error');
-            return;
-        }
-
-        data.jobs.forEach(job => {
-            if (job.status === 'in_progress') {
-                const activeStep = job.steps.find(s => s.status === 'in_progress');
-                if (activeStep) {
-                    const msg = `[${job.name}] Executing: ${activeStep.name}...`;
-                    if (!terminal.lastChild || !terminal.lastChild.textContent.includes(msg)) {
-                        log(msg, "warn");
-                    }
-                }
-            } else if (job.status === 'completed' && job.conclusion === 'failure') {
-                const failedStep = job.steps.find(s => s.conclusion === 'failure');
-                if (failedStep) {
-                    log(`[${job.name}] FAILED at step: ${failedStep.name}`, "error");
-                }
-            }
-        });
-
-    } catch (error) {
-        console.error("Polling error:", error);
-    }
-}
-
-const processBtn = document.getElementById('processBtn');
-if (processBtn) {
-    processBtn.addEventListener('click', async () => {
-        const fileInput = document.getElementById('sourceInput');
-        const layersCount = document.getElementById('layersInput').value;
-        const proxyUrl = "https://paperplanes.hereliesaz.workers.dev"; 
-
-        terminal.innerHTML = '';
-        if (pollInterval) clearInterval(pollInterval);
-
-        terminalStatus.textContent = 'EXECUTING';
-        terminalStatus.style.color = '#ffaa00';
-        log("=== INITIATING PAPERPLANES PIPELINE ===");
-
-        if (!fileInput.files.length) {
-            log("FATAL: No source image selected.", "error");
-            terminalStatus.textContent = 'HALTED';
-            terminalStatus.style.color = '#ff4444';
-            return;
-        }
-
-        const file = fileInput.files[0];
-        const newFilename = `original_layers-${layersCount}.${file.name.split('.').pop()}`;
-        
-        log(`File acquired: ${newFilename}`);
-
-        const reader = new FileReader();
-        reader.onload = async function(event) {
-            const base64Content = event.target.result.split(',')[1];
-            log("Transmitting payload to Cloudflare Proxy...", "warn");
-
-            try {
-                const response = await fetch(proxyUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        path: `inbox/${newFilename}`,
-                        content: base64Content,
-                        message: `Pipeline upload: ${newFilename}`
-                    })
-                });
-
-                if (response.ok) {
-                    log("=== UPLOAD SUCCESS ===", "info");
-                    log("Corpse injected into repository. Waking the Cloud Runner...");
-                    terminalStatus.textContent = 'POLLING TELEMETRY';
-                    
-                    pollInterval = setInterval(() => pollTelemetry(proxyUrl), 5000);
-                } else {
-                    const errData = await response.text();
-                    log(`Proxy responded with HTTP ${response.status}: ${errData}`, "error");
-                    terminalStatus.textContent = 'NETWORK FAULT';
-                }
-            } catch (error) {
-                log(`Network transmission failed: ${error.message}`, "error");
-                terminalStatus.textContent = 'OFFLINE';
-            }
-        };
-        reader.readAsDataURL(file);
-    });
-}
-
-// --- REALIGNER MODULE ---
+// --- REALIGNER MODULE (Initialized first so pipeline can feed it) ---
 const canvas = document.getElementById('canvas');
 const ctx = canvas ? canvas.getContext('2d') : null;
 let baseImg = new Image(), depthImg = new Image();
@@ -226,4 +105,153 @@ if (exportBtn) {
         link.href = exportCanvas.toDataURL('image/png');
         link.click();
     };
+}
+
+// --- PIPELINE MODULE ---
+const terminal = document.getElementById('terminal');
+const terminalStatus = document.getElementById('terminalStatus');
+let pollInterval = null;
+
+function log(msg, level = 'info') {
+    const now = new Date();
+    const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+    const line = document.createElement('div');
+    line.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="log-${level}">${msg}</span>`;
+    terminal.appendChild(line);
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+const slider = document.getElementById('layersInput');
+const display = document.getElementById('layerDisplay');
+if (slider && display) {
+    slider.addEventListener('input', (e) => {
+        display.textContent = e.target.value;
+    });
+}
+
+// Auto-wire the original image into the realigner upon selection
+document.getElementById('sourceInput').addEventListener('change', (e) => {
+    loadImg(e, baseImg, () => {
+        hasBase = true;
+        drawCanvas();
+        log("Original image loaded. Auto-wired into Realigner base layer.", "info");
+    });
+});
+
+async function pollTelemetry(proxyUrl) {
+    try {
+        const response = await fetch(proxyUrl, { method: 'GET' });
+        if (!response.ok) return;
+
+        const data = await response.json();
+        
+        if (data.status === 'completed') {
+            clearInterval(pollInterval);
+            terminalStatus.textContent = data.conclusion.toUpperCase();
+            terminalStatus.style.color = data.conclusion === 'success' ? '#00ff00' : '#ff4444';
+            log(`Workflow execution completed with status: ${data.conclusion.toUpperCase()}`, data.conclusion === 'success' ? 'info' : 'error');
+            
+            if (data.conclusion === 'success') {
+                // Outsmarting reality by assuming the proxy serves up the artifacts at these logical URLs
+                const photoUrl = data.artifacts?.photo || '/workspace/generated_image.png';
+                const depthUrl = data.artifacts?.depth || '/workspace/raw_depth_map.png';
+                
+                document.getElementById('artifact-gallery').style.display = 'flex';
+                document.getElementById('gallery-photo').src = photoUrl;
+                document.getElementById('gallery-depth').src = depthUrl;
+                
+                // Feed the beast: Auto-load depth map into realigner overlay
+                depthImg.onload = () => { 
+                    hasDepth = true; 
+                    drawCanvas(); 
+                    log("Depth Topology extracted and wired to Realigner overlay. Switch tabs to adjust.", "warn");
+                };
+                depthImg.src = depthUrl;
+            }
+            return;
+        }
+
+        data.jobs.forEach(job => {
+            if (job.status === 'in_progress') {
+                const activeStep = job.steps.find(s => s.status === 'in_progress');
+                if (activeStep) {
+                    const msg = `[${job.name}] Executing: ${activeStep.name}...`;
+                    if (!terminal.lastChild || !terminal.lastChild.textContent.includes(msg)) {
+                        log(msg, "warn");
+                    }
+                }
+            } else if (job.status === 'completed' && job.conclusion === 'failure') {
+                const failedStep = job.steps.find(s => s.conclusion === 'failure');
+                if (failedStep) {
+                    log(`[${job.name}] FAILED at step: ${failedStep.name}`, "error");
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("Polling error:", error);
+    }
+}
+
+const processBtn = document.getElementById('processBtn');
+if (processBtn) {
+    processBtn.addEventListener('click', async () => {
+        const fileInput = document.getElementById('sourceInput');
+        const layersCount = document.getElementById('layersInput').value;
+        const proxyUrl = "https://paperplanes.hereliesaz.workers.dev"; 
+
+        terminal.innerHTML = '';
+        document.getElementById('artifact-gallery').style.display = 'none';
+        if (pollInterval) clearInterval(pollInterval);
+
+        terminalStatus.textContent = 'EXECUTING';
+        terminalStatus.style.color = '#ffaa00';
+        log("=== INITIATING PAPERPLANES PIPELINE ===");
+
+        if (!fileInput.files.length) {
+            log("FATAL: No source image selected.", "error");
+            terminalStatus.textContent = 'HALTED';
+            terminalStatus.style.color = '#ff4444';
+            return;
+        }
+
+        const file = fileInput.files[0];
+        const newFilename = `original_layers-${layersCount}.${file.name.split('.').pop()}`;
+        
+        log(`File acquired: ${newFilename}`);
+
+        const reader = new FileReader();
+        reader.onload = async function(event) {
+            const base64Content = event.target.result.split(',')[1];
+            log("Transmitting payload to Cloudflare Proxy...", "warn");
+
+            try {
+                const response = await fetch(proxyUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        path: `inbox/${newFilename}`,
+                        content: base64Content,
+                        message: `Pipeline upload: ${newFilename}`
+                    })
+                });
+
+                if (response.ok) {
+                    log("=== UPLOAD SUCCESS ===", "info");
+                    log("Corpse injected into repository. Waking the Cloud Runner...");
+                    terminalStatus.textContent = 'POLLING TELEMETRY';
+                    
+                    pollInterval = setInterval(() => pollTelemetry(proxyUrl), 5000);
+                } else {
+                    const errData = await response.text();
+                    log(`Proxy responded with HTTP ${response.status}: ${errData}`, "error");
+                    terminalStatus.textContent = 'NETWORK FAULT';
+                }
+            } catch (error) {
+                log(`Network transmission failed: ${error.message}`, "error");
+                terminalStatus.textContent = 'OFFLINE';
+            }
+        };
+        reader.readAsDataURL(file);
+    });
 }
