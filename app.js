@@ -44,7 +44,7 @@ let base64Payload = null;
 let currentFileName = null;
 let isAwaitingManualWarp = false;
 
-// The Ledger of Reality. Prevents GitHub's slow API from tricking us into the past.
+// The Ledger of Reality
 let processedRuns = new Set();
 let activeRunTracker = null;
 
@@ -70,7 +70,7 @@ document.getElementById('processBtn').addEventListener('click', () => {
     executeStep(currentStepIdx);
 });
 
-async function executeStep(index, manualCoords = null) {
+async function executeStep(index, manualCoords = null, customPrompt = null) {
     const step = WORKFLOW[index];
     if (!step) return;
 
@@ -81,6 +81,7 @@ async function executeStep(index, manualCoords = null) {
     log(`--- INITIATING: ${step.title} ---`);
     document.getElementById('approval-ui').style.display = 'none';
     document.getElementById('manual-crop-ui').style.display = 'none';
+    document.getElementById('manual-prompt-ui').style.display = 'none';
 
     if (step.id === 'align') {
         log("Redirecting to Realigner Tab for manual override.", "warn");
@@ -94,7 +95,8 @@ async function executeStep(index, manualCoords = null) {
             content: base64Payload,
             job: step.id,
             layers: document.getElementById('layersInput').value,
-            coords: manualCoords || ""
+            coords: manualCoords || "",
+            prompt: customPrompt || ""
         });
 
         const response = await fetch(proxyUrl, {
@@ -137,9 +139,8 @@ async function pollTelemetry(step) {
         }
 
         if (data.status === 'completed') {
-            // The Gatekeeper: Have we already processed this specific corpse?
             if (data.run_id && processedRuns.has(data.run_id)) {
-                return; // Silently wait. The GitHub API hasn't registered the new dispatch yet.
+                return; 
             }
 
             if (data.run_id) processedRuns.add(data.run_id);
@@ -189,11 +190,25 @@ document.getElementById('btn-reject').addEventListener('click', () => {
     if (currentStepIdx === 0) {
         log("Auto-detection failed. Summoning manual vector tools.", "warn");
         initCropUI();
+    } else if (currentStepIdx === 1) {
+        log("Hallucination rejected. Awaiting aggressive semantic correction.", "warn");
+        document.getElementById('approval-ui').style.display = 'none';
+        document.getElementById('manual-prompt-ui').style.display = 'block';
     } else {
         log("Halting sequence entirely.", "error");
         document.getElementById('approval-ui').style.display = 'none';
         document.getElementById('init-container').style.display = 'block';
     }
+});
+
+document.getElementById('btn-submit-prompt').addEventListener('click', () => {
+    const newPrompt = document.getElementById('customPromptInput').value.trim();
+    if (!newPrompt) {
+        log("You cannot submit an empty directive to the void.", "error");
+        return;
+    }
+    log(`Injecting override directive: "${newPrompt}"`, "warn");
+    executeStep(currentStepIdx, null, newPrompt);
 });
 
 // --- MANUAL CROP MODULE ---
