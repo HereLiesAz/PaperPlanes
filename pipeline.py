@@ -66,8 +66,12 @@ def perspective_crop():
         M = cv2.getPerspectiveTransform(rect, dst)
         warped = cv2.warpPerspective(orig, M, (maxWidth, maxHeight))
         
-        cv2.imwrite("workspace/cropped_image.png", warped)
-        log("Manual mathematical amputation successful. Saved to workspace/cropped_image.png")
+        success = cv2.imwrite("workspace/cropped_image.png", warped)
+        if success:
+            log("Manual mathematical amputation successful. Saved to workspace/cropped_image.png")
+        else:
+            log("FATAL: OpenCV failed to construct the severed artifact.")
+            sys.exit(1)
         return
     
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -108,8 +112,12 @@ def perspective_crop():
         M = cv2.getPerspectiveTransform(rect, dst)
         warped = cv2.warpPerspective(orig, M, (maxWidth, maxHeight))
         
-        cv2.imwrite("workspace/cropped_image.png", warped)
-        log("Cropped and warped image saved to workspace/cropped_image.png")
+        success = cv2.imwrite("workspace/cropped_image.png", warped)
+        if success:
+            log("Cropped and warped image saved to workspace/cropped_image.png")
+        else:
+            log("FATAL: OpenCV failed to construct the auto-cropped artifact.")
+            sys.exit(1)
     else:
         log("No definitive 4-point boundaries found. Preserving original bounds.")
         cv2.imwrite("workspace/cropped_image.png", orig)
