@@ -69,7 +69,7 @@ export default {
         const cacheBuster = `&t=${new Date(latestRun.updated_at).getTime() || Date.now()}`;
 
         const payload = {
-          run_id: latestRun.id, // Exposing the ID to cure the frontend's amnesia
+          run_id: latestRun.id,
           status: latestRun.status,
           conclusion: latestRun.conclusion,
           jobs: jobsData.jobs || [],
@@ -86,7 +86,7 @@ export default {
       // --- TRIGGER ENDPOINT (POST) ---
       if (request.method === "POST") {
         const body = await request.json();
-        const { path, content, message, job, layers, coords } = body;
+        const { path, content, message, job, layers, coords, prompt } = body;
 
         if (!path || !content) {
           return new Response(JSON.stringify({ error: "MALFORMED PAYLOAD" }), { status: 418, headers: corsHeaders });
@@ -132,7 +132,8 @@ export default {
               job: job || "segment",
               layers: layers || "6",
               file: path,
-              coords: coords || ""
+              coords: coords || "",
+              prompt: prompt || ""
             }
           })
         });
