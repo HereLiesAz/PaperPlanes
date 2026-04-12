@@ -4,8 +4,8 @@
   "description": "Sequential deconstruction of paintings into 3D stratified paper theater layers.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#0a0a0a",
-  "theme_color": "#000000",
+  "background_color": "#050505",
+  "theme_color": "#007bff",
   "icons": [
     {
       "src": "paper_planes_icon.png",
