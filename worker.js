@@ -14,11 +14,11 @@ export default {
     try {
       // --- POLLING ENDPOINT (GET) ---
       if (request.method === "GET") {
-        const repo = "hereliesaz/paperplanes";
-        const githubToken = env.GITHUB_TOKEN; 
+        const repo = env.GH_REPO;
+        const githubToken = env.GH_TOKEN; 
         
-        if (!githubToken) {
-          return new Response(JSON.stringify({ error: "GITHUB_TOKEN secret not configured in worker environment." }), { 
+        if (!githubToken || !repo) {
+          return new Response(JSON.stringify({ error: "GH_TOKEN or GH_REPO secret not configured in worker environment." }), { 
             status: 500, 
             headers: { ...corsHeaders, "Content-Type": "application/json" } 
           });
@@ -75,11 +75,11 @@ export default {
       if (request.method === "POST") {
         const body = await request.json();
         const { path, content, message, job, layers } = body;
-        const repo = "hereliesaz/paperplanes";
-        const githubToken = env.GITHUB_TOKEN;
+        const repo = env.GH_REPO;
+        const githubToken = env.GH_TOKEN;
 
-        if (!githubToken) {
-          return new Response(JSON.stringify({ error: "GITHUB_TOKEN secret not configured." }), { 
+        if (!githubToken || !repo) {
+          return new Response(JSON.stringify({ error: "GH_TOKEN or GH_REPO secret not configured." }), { 
             status: 500, 
             headers: { ...corsHeaders, "Content-Type": "application/json" } 
           });
