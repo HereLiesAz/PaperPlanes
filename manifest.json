@@ -8,7 +8,7 @@
   "theme_color": "#007bff",
   "icons": [
     {
-      "src": "image_0.png",
+      "src": "paper_planes_icon.png",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any maskable"
