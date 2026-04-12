@@ -6,9 +6,7 @@ const corsHeaders = {
 
 export default {
   async fetch(request, env, ctx) {
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
-    }
+    if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
     try {
       const url = new URL(request.url);
@@ -16,70 +14,56 @@ export default {
       const githubToken = env.GH_TOKEN; 
 
       if (!githubToken || !repo) {
-        return new Response(JSON.stringify({ error: "SECRETS MISSING" }), { 
-          status: 418, 
-          headers: { ...corsHeaders, "Content-Type": "application/json" } 
-        });
+        return new Response(JSON.stringify({ error: "SECRETS_MISSING" }), { status: 418, headers: corsHeaders });
       }
 
-      // --- IMAGE PROXY ---
+      // --- IMAGE PROXY (Direct from Repo Meta) ---
       const fileParam = url.searchParams.get("file");
       if (request.method === "GET" && fileParam) {
         const fileRes = await fetch(`https://api.github.com/repos/${repo}/contents/${fileParam}`, {
           headers: {
             "User-Agent": "Cloudflare-Worker",
             "Authorization": `Bearer ${githubToken}`,
-            "Accept": "application/vnd.github.v3.raw" 
+            "Accept": "application/vnd.github.v3+json"
           }
         });
-
-        if (!fileRes.ok) return new Response("File not found", { status: 404, headers: corsHeaders });
-
-        const contentType = fileParam.endsWith('.png') ? 'image/png' : 'image/jpeg';
-        return new Response(fileRes.body, { 
-          headers: { ...corsHeaders, "Content-Type": contentType, "Cache-Control": "no-cache" } 
-        });
+        if (!fileRes.ok) return new Response("404", { status: 404, headers: corsHeaders });
+        const data = await fileRes.json();
+        const binaryString = atob(data.content.replace(/\n/g, ""));
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+        return new Response(bytes, { headers: { ...corsHeaders, "Content-Type": "image/png" } });
       }
 
-      // --- POLLING WITH READINESS CHECK ---
+      // --- POLLING ---
       if (request.method === "GET") {
         const headers = {
           "User-Agent": "Cloudflare-Worker",
           "Authorization": `Bearer ${githubToken}`,
           "Accept": "application/vnd.github.v3+json"
         };
-
         const runsRes = await fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=1`, { headers });
         const runsData = await runsRes.json();
         const latestRun = runsData.workflow_runs[0];
+        
+        if (!latestRun) return new Response(JSON.stringify({ status: "idle" }), { headers: corsHeaders });
 
-        if (!latestRun) {
-          return new Response(JSON.stringify({ status: "idle" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-
-        const isReady = latestRun.status === "completed" && latestRun.conclusion === "success";
         const baseUrl = url.origin + url.pathname;
-        const cacheBuster = `&t=${new Date(latestRun.updated_at).getTime()}`;
-
-        const payload = {
+        return new Response(JSON.stringify({
           run_id: latestRun.id,
           status: latestRun.status,
           conclusion: latestRun.conclusion,
-          is_ready: isReady,
-          artifacts: isReady ? {
-            output: `${baseUrl}?file=workspace/cropped_image.png${cacheBuster}`, 
-            photo: `${baseUrl}?file=workspace/generated_image.png${cacheBuster}`,
-            depth: `${baseUrl}?file=workspace/raw_depth_map.png${cacheBuster}`
-          } : null
-        };
-
-        return new Response(JSON.stringify(payload), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          artifacts: {
+            output: `${baseUrl}?file=workspace/cropped_image.png&t=${Date.now()}`, 
+            photo: `${baseUrl}?file=workspace/generated_image.png&t=${Date.now()}`,
+            depth: `${baseUrl}?file=workspace/raw_depth_map.png&t=${Date.now()}`
+          }
+        }), { headers: corsHeaders });
       }
 
       // --- TRIGGER ---
       if (request.method === "POST") {
         const body = await request.json();
-        const { path, content, message, job, layers, coords, prompt } = body;
         const headers = {
           "User-Agent": "Cloudflare-Worker",
           "Authorization": `Bearer ${githubToken}`,
@@ -87,27 +71,47 @@ export default {
           "Content-Type": "application/json"
         };
 
+        // Get file SHA for update
         let fileSha = null;
-        const getFile = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { headers });
-        if (getFile.ok) fileSha = (await getFile.json()).sha;
+        const getFile = await fetch(`https://api.github.com/repos/${repo}/contents/${body.path}`, { headers });
+        if (getFile.ok) {
+          const fileData = await getFile.json();
+          fileSha = fileData.sha;
+        }
 
-        await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+        // Upload
+        const putRes = await fetch(`https://api.github.com/repos/${repo}/contents/${body.path}`, {
           method: "PUT",
-          headers,
-          body: JSON.stringify({ message: message || "Update", content, sha: fileSha || undefined })
+          headers: headers,
+          body: JSON.stringify({
+            message: `Upload ${body.job}`,
+            content: body.content,
+            branch: "main",
+            sha: fileSha || undefined
+          })
         });
 
+        if (!putRes.ok) return new Response(await putRes.text(), { status: 418, headers: corsHeaders });
+
+        // Dispatch
         await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
           method: "POST",
-          headers,
-          body: JSON.stringify({ event_type: "pipeline_trigger", client_payload: { job, layers, coords, prompt } })
+          headers: headers,
+          body: JSON.stringify({
+            event_type: "pipeline_trigger",
+            client_payload: { 
+              job: body.job, 
+              layers: body.layers, 
+              coords: body.coords, 
+              prompt: body.prompt 
+            }
+          })
         });
 
-        return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       }
-
     } catch (e) {
-      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+      return new Response(e.message, { status: 500, headers: corsHeaders });
     }
   }
 };
