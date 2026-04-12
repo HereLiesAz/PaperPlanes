@@ -8,6 +8,11 @@ permissions:
   contents: write
   actions: read
 
+# Fix: Prevents multiple pipelines from running at the same time and conflicting
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   execute_step:
     runs-on: ubuntu-latest
