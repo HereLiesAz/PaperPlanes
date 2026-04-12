@@ -1,49 +1,59 @@
-# PaperPlanes
+# PAPERPLANES
+### Slicing the two-dimensional lie into a stratified hallucination.
 
-PaperPlanes is an automated image segmentation and depth-extraction pipeline designed for execution in Google Colab. It processes 2D source images, synthesizes a structural representation to enhance depth perception, and slices the original image into discrete, transparent Z-axis layers.
+**PaperPlanes** is a sequential pipeline designed to dismantle the static nature of 2D paintings and reconstruct them as stratified, multi-layered 3D paper theater layers. This is not a "filter"; it is a multimodal reconstruction and spatial reconciliation engine.
 
-## Pipeline Steps
+---
 
-The script executes a strict five-phase process on each provided image:
+## I. THE ARCHITECTURE
 
-1. **Phase 1: Background Removal**
-   The pipeline utilizes `rembg` to isolate the primary subject from the background, generating an alpha mask that bounds all subsequent topological calculations.
+### 1. The Wizard (Frontend PWA)
+A monochromatic, "Glitch-Noir" interface that manages the pipeline’s state. 
+* **Object Permanence:** Tracks unique `run_id` state changes to prevent the ingestion of stale artifacts from the GitHub cache.
+* **Manual Overrides:** Provides vertex-dragging for perspective warping, text-injection for semantic reconstruction, and a 5-axis affine transformation suite for depth reconciliation.
 
-2. **Phase 2: Structural Generation**
-   Using `Stable Diffusion v1.5` (img2img) with a high modification strength, the script reimagines the isolated 2D subject as a hyper-realistic, physically lit photograph. This step removes original medium artifacts (such as canvas textures, brushstrokes, or flat lighting) that typically confuse depth-estimation models.
+### 2. The Smuggler (Cloudflare Worker Proxy)
+A serverless bridge that bypasses GitHub’s aggressive 5-minute CDN cache.
+* **Binary Reconstruction:** Fetches file metadata, retrieves raw Base64 strings, and decodes them in-flight into a `Uint8Array` to serve fresh image bytes directly to the Wizard.
 
-3. **Phase 3: Image Alignment**
-   The generated structural image is mapped back to the original image using OpenCV's ORB feature detection and homography mapping. This warps the newly generated geometry so that it perfectly aligns with the pixel coordinates of the original source subject.
+### 3. The Executioner (GitHub Action Runner)
+The compute-heavy viscera of the operation.
+* **Serial Sanity:** Uses `concurrency` groups to ensure a single lane of execution, preventing repository corruption during simultaneous triggers.
+* **Multimodal Engine:** Leverages Gemini 1.5 Flash to deconstruct and reconstruct imagery, and Depth-Anything-V2 for spatial inference.
 
-4. **Phase 4: Depth Extraction**
-   Using `Depth-Anything-V2`, the pipeline infers a highly detailed Z-axis depth map from the structurally aligned generated image.
+---
 
-5. **Phase 5: Strata Segmentation**
-   The depth map is normalized on a 0-255 scale strictly within the boundaries of the subject mask. Based on the requested layer count, the pipeline calculates topological thresholds and slices the *original* image into discrete, transparent PNG layers.
+## II. THE PIPELINE
 
-## Execution Features
+1.  **CROP:** Auto-detection or manual 4-point vector warp. Result: `cropped_image.png`.
+2.  **GENERATE:** Multimodal reconstruction. Painting becomes photograph. Result: `generated_image.png`.
+3.  **DEPTH:** Neural spatial inference. Result: `raw_depth_map.png`.
+4.  **ALIGN:** Human-in-the-loop affine sync. Result: `realigned_depth_map.png`.
+5.  **SEGMENT:** Linear binning and mask smoothing. Result: `paper_planes_layers.zip`.
 
-* **Google Drive Integration:** All processed strata are automatically packaged into ZIP files and saved persistently to a designated folder in your Google Drive (`/MyDrive/PaperPlanes_Autopsy`).
-* **Batch Processing:** Supports uploading multiple files simultaneously through the Colab web interface.
-* **Validation & Deduplication:** The script automatically filters out non-image files and utilizes MD5 hashing to prevent the redundant processing of duplicate files within the same session.
+---
 
-## Usage
+## III. DEPLOYMENT & SECRETS
 
-1. Open the script in a Google Colab environment with a GPU runtime enabled (T4 or higher).
-2. Install the necessary dependencies in the first execution block.
-3. Run the main script block. You will be prompted to authenticate with Google Drive to establish the output directory.
-4. Use the generated upload widget to provide your source images. The pipeline will process each image sequentially and commit the ZIP files to your Drive.
+### 1. GitHub Configuration
+Ensure the repository has "Read and write permissions" enabled under **Settings > Actions > General**.
 
-## Dependencies
+### 2. Secrets Management
+The following secrets must be defined in the repository:
+* `GH_TOKEN`: Your Personal Access Token.
+* `GH_REPO`: `Username/RepositoryName`.
+* `GEMINI_API_KEY`: Your Google AI Studio token.
 
-~~~text
-rembg[gpu]
-torch
-diffusers
-transformers
-accelerate
-opencv-python-headless
-pillow
-numpy
-requests
-~~~
+### 3. Smuggler Setup
+Update the `proxyUrl` in `app.js` and deploy `worker.js` to Cloudflare with the corresponding environment variables.
+
+---
+
+## IV. AESTHETIC DIRECTIVE
+This tool values the irony of outsmarting reality. All visual outputs must strive for a "Pixelated Angst"—monochromatic, minimalistic, and emotionally provocative. 
+
+"Mister Rogers opening the gate" is explicitly designated as non-weighted imagery.
+
+---
+
+04/12/2026 05:26 pm
