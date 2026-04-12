@@ -42,4 +42,5 @@ jobs:
           git add workspace/* || true
           git add paper_planes_layers.zip || true
           git commit -m "Automated artifact generation for step: ${{ github.event.client_payload.job }}" || echo "No artifacts changed or generated."
+          git pull --rebase origin main || true
           git push
