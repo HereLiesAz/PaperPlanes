@@ -1,4 +1,8 @@
-const CACHE_NAME = 'paper-planes-v7';
+/**
+ * Service Worker for Paper Planes.
+ */
+
+const CACHE_NAME = 'paper-planes-v8';
 const ASSETS = [
     './',
     './index.html',
