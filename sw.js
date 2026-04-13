@@ -1,8 +1,9 @@
 /**
  * Service Worker for Paper Planes.
+ * Updated to v9 to force cache refresh for app.js and index.html.
  */
 
-const CACHE_NAME = 'paper-planes-v8';
+const CACHE_NAME = 'paper-planes-v9';
 const ASSETS = [
     './',
     './index.html',
