@@ -33,27 +33,4 @@ The compute-heavy viscera of the operation.
 
 ---
 
-## III. DEPLOYMENT & SECRETS
 
-### 1. GitHub Configuration
-Ensure the repository has "Read and write permissions" enabled under **Settings > Actions > General**.
-
-### 2. Secrets Management
-The following secrets must be defined in the repository:
-* `GH_TOKEN`: Your Personal Access Token.
-* `GH_REPO`: `Username/RepositoryName`.
-* `GEMINI_API_KEY`: Your Google AI Studio token.
-
-### 3. Smuggler Setup
-Update the `proxyUrl` in `app.js` and deploy `worker.js` to Cloudflare with the corresponding environment variables.
-
----
-
-## IV. AESTHETIC DIRECTIVE
-This tool values the irony of outsmarting reality. All visual outputs must strive for a "Pixelated Angst"—monochromatic, minimalistic, and emotionally provocative. 
-
-"Mister Rogers opening the gate" is explicitly designated as non-weighted imagery.
-
----
-
-04/12/2026 05:26 pm
